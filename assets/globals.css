@@ -1,0 +1,201 @@
+@import "tailwindcss";
+
+/*
+ * Glance glass theme, from the Claude Design prototype ("Glance Prototype.dc.html", 15 Sep 2026).
+ * Dark only: glass needs something to blur. One accent (#5b8cff), Space Grotesk for UI, IBM Plex
+ * Mono for numbers and labels. The shadcn-style names are kept so existing classes keep working;
+ * the glass surfaces are the .glass* classes below.
+ */
+@font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 300 700; font-display: swap; src: url("/fonts/SpaceGrotesk-300_700.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("/fonts/IBMPlexMono-400.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url("/fonts/IBMPlexMono-500.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 600; font-display: swap; src: url("/fonts/IBMPlexMono-600.woff2") format("woff2"); }
+
+:root {
+  color-scheme: dark;
+  --background: #121216;
+  --foreground: #f4f4f6;
+  --card: rgba(255, 255, 255, 0.055);
+  --card-foreground: #f4f4f6;
+  --popover: rgba(24, 24, 32, 0.66);
+  --popover-foreground: #f4f4f6;
+  --primary: #5b8cff;
+  --primary-foreground: #08122c;
+  --primary-hover: #7ba3ff;
+  --secondary: rgba(255, 255, 255, 0.085);
+  --secondary-foreground: #f4f4f6;
+  --muted: rgba(255, 255, 255, 0.07);
+  --muted-foreground: #8b8b96;
+  --muted-2: #6c6c78;
+  --text-2: #c8c8d2;
+  --text-3: #b6b6c2;
+  --accent: #5b8cff;
+  --accent-foreground: #08122c;
+  --accent-soft: rgba(91, 140, 255, 0.14);
+  --accent-text: #93b3ff;
+  --destructive: #f0544a;
+  --destructive-hover: #ff6a60;
+  --destructive-foreground: #ffffff;
+  --danger-text: #ff7e6e;
+  --success: #6fe39f;
+  --warn: #ff9f45;
+  --phantom: #5747b8;
+  --phantom-hover: #6a58d4;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.13);
+  --border-solid: #2f2f3a;
+  --chip-bg: #1d1d25;
+  --input: rgba(255, 255, 255, 0.13);
+  --ring: #5b8cff;
+  --radius: 14px;
+  --shadow-float: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted-2: var(--muted-2);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-text: var(--accent-text);
+  --color-destructive: var(--destructive);
+  --color-destructive-hover: var(--destructive-hover);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-danger-text: var(--danger-text);
+  --color-success: var(--success);
+  --color-warn: var(--warn);
+  --color-phantom: var(--phantom);
+  --color-phantom-hover: var(--phantom-hover);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-solid: var(--border-solid);
+  --color-chip: var(--chip-bg);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: 9px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-2xl: 16px;
+  --font-sans: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply text-foreground font-sans text-sm antialiased;
+    margin: 0;
+    background:
+      radial-gradient(900px 620px at 88% 8%, rgba(91, 140, 255, 0.2), transparent 62%),
+      radial-gradient(700px 520px at 96% 92%, rgba(111, 227, 159, 0.1), transparent 60%),
+      var(--background);
+    background-attachment: fixed;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+  ::selection {
+    background: rgba(91, 140, 255, 0.35);
+  }
+}
+
+@layer components {
+  /* Glass surfaces, in order of prominence. */
+  .glass {
+    background: rgba(255, 255, 255, 0.055);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    backdrop-filter: blur(18px) saturate(150%);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 14px;
+  }
+  .glass-strong {
+    background: rgba(11, 11, 16, 0.88);
+    -webkit-backdrop-filter: blur(32px) saturate(170%);
+    backdrop-filter: blur(32px) saturate(170%);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 16px;
+    box-shadow: var(--shadow-float);
+  }
+  .glass-bar {
+    background: rgba(255, 255, 255, 0.05);
+    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
+  }
+  .glass-btn {
+    background: rgba(255, 255, 255, 0.085);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+  }
+  .glass-btn:hover {
+    border-color: rgba(255, 255, 255, 0.28);
+  }
+  .dashed {
+    background: rgba(255, 255, 255, 0.028);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    border: 1px dashed rgba(255, 255, 255, 0.14);
+    border-radius: 14px;
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--muted-2);
+    text-transform: uppercase;
+  }
+  .hairline {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.1);
+  }
+  .rise {
+    animation: glance-rise 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
+
+@keyframes glance-rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes glance-toast {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+@keyframes glance-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(91, 140, 255, 0.45), 0 8px 24px rgba(0, 0, 0, 0.45); }
+  50% { box-shadow: 0 0 0 12px rgba(91, 140, 255, 0), 0 8px 24px rgba(0, 0, 0, 0.45); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

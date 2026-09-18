@@ -1,0 +1,828 @@
+/*
+ * The bubble in the glass design (Claude Design prototype, 15 Sep 2026). Fonts are bundled with
+ * the extension; bubble.ts registers the font faces with the extension URL, since a shadow
+ * stylesheet cannot use the extension-id message placeholder.
+ *
+ * Never write an at-sign followed by "property" or "font-face" in this file, not even in a comment:
+ * WXT's shadow-root loader cuts from there to the next closing brace (split-shadow-root-css), which
+ * in the dev build removed the token block below and turned every token-coloured text black.
+ */
+:host {
+  all: initial;
+  --gb-bg: rgba(11, 11, 16, 0.88);
+  --gb-fg: #f4f4f6;
+  --gb-text-2: #c8c8d2;
+  --gb-text-3: #b6b6c2;
+  --gb-muted: #8b8b96;
+  --gb-muted-2: #6c6c78;
+  --gb-border: rgba(255, 255, 255, 0.16);
+  --gb-border-soft: rgba(255, 255, 255, 0.1);
+  --gb-border-solid: #2f2f3a;
+  --gb-chip: #1d1d25;
+  --gb-accent: #5b8cff;
+  --gb-accent-hover: #7ba3ff;
+  --gb-accent-fg: #08122c;
+  --gb-accent-text: #93b3ff;
+  --gb-danger: #ff7e6e;
+  --gb-success: #6fe39f;
+  --gb-warn: #ff9f45;
+  --gb-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  --gb-radius: 16px;
+  font-family: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--gb-fg);
+  -webkit-font-smoothing: antialiased;
+}
+* {
+  box-sizing: border-box;
+}
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+button:focus-visible,
+.chip:focus-visible,
+.avatar:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--gb-accent);
+  outline-offset: 2px;
+}
+.mono {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+
+/* The font is set on our own containers as well as :host: inside a shadow root Chrome resolved the
+   host's family to the UA default even with the declaration after `all: initial`. */
+.root,
+.mini {
+  font-family: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--gb-fg);
+}
+.root {
+  position: fixed;
+  z-index: 2147483000;
+  right: 28px;
+  bottom: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  pointer-events: none;
+}
+.root > * {
+  pointer-events: auto;
+}
+
+/* The orb: a thinking orb (orb.ts) on liquid glass (glass.ts). Breathing at rest; the ring takes
+   the accent, or green / red after a buy or a refusal. */
+.avatar {
+  --glass-tint: rgba(13, 13, 18, 0.62);
+  --orb-ring: rgba(91, 140, 255, 0.55);
+  width: 60px;
+  height: 60px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.42);
+  display: grid;
+  place-items: center;
+  position: relative;
+  touch-action: none;
+  user-select: none;
+  transition: translate 200ms ease-out, scale 200ms ease-out, box-shadow 220ms ease-out;
+}
+.avatar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1.5px var(--orb-ring);
+  pointer-events: none;
+  transition: box-shadow 220ms ease-out;
+}
+.avatar:active {
+  scale: 0.96;
+}
+.orb {
+  position: relative;
+  z-index: 1;
+  display: block;
+  pointer-events: none;
+}
+.avatar[data-state="idle"][data-has-entities="true"] {
+  animation: gb-breathe 2.8s ease-in-out infinite;
+}
+.avatar[data-state="listening"] {
+  --orb-ring: var(--gb-accent);
+  box-shadow: 0 0 0 6px rgba(91, 140, 255, 0.22), 0 10px 28px rgba(0, 0, 0, 0.42);
+}
+.avatar[data-state="done"] {
+  --orb-ring: var(--gb-success);
+}
+.avatar[data-state="error"] {
+  --orb-ring: var(--gb-danger);
+}
+@keyframes gb-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(91, 140, 255, 0.45), 0 10px 28px rgba(0, 0, 0, 0.42); }
+  50% { box-shadow: 0 0 0 12px rgba(91, 140, 255, 0), 0 10px 28px rgba(0, 0, 0, 0.42); }
+}
+@keyframes gb-listen {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.25); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .avatar { animation: none !important; transition: none !important; }
+}
+
+/* Liquid glass (glass.ts, after liquid-glass-react): a blurred backdrop bent at the rim by an SVG
+   filter, a tint for legibility on any page, and two highlight rims that follow the pointer.
+   No mix-blend-mode here (the original rims use screen and overlay): a blending sibling turns the
+   group into the backdrop root in Chromium, and the blur then has nothing behind it to read. */
+.glass-filter {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.glass-warp,
+.glass-tint,
+.glass-rim,
+.glass-shine {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.glass-tint {
+  z-index: 0;
+  background: var(--glass-tint, transparent);
+}
+.glass-warp {
+  z-index: 0;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+.glass-rim {
+  --rim-angle: calc(135deg + var(--glass-mx, 0) * 1.2deg);
+  --rim-stop-1: max(10%, calc(33% + var(--glass-my, 0) * 0.3%));
+  --rim-stop-2: min(90%, calc(66% + var(--glass-my, 0) * 0.4%));
+  z-index: 2;
+  padding: 1.5px;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.5), inset 0 1px 3px rgba(255, 255, 255, 0.25), 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+.glass-rim-screen {
+  opacity: 0.35;
+  background: linear-gradient(
+    var(--rim-angle),
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, calc(0.12 + var(--glass-ax, 0) * 0.008)) var(--rim-stop-1),
+    rgba(255, 255, 255, calc(0.4 + var(--glass-ax, 0) * 0.012)) var(--rim-stop-2),
+    rgba(255, 255, 255, 0) 100%
+  );
+}
+.glass-rim-overlay {
+  opacity: 0.5;
+  background: linear-gradient(
+    var(--rim-angle),
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, calc(0.32 + var(--glass-ax, 0) * 0.008)) var(--rim-stop-1),
+    rgba(255, 255, 255, calc(0.6 + var(--glass-ax, 0) * 0.012)) var(--rim-stop-2),
+    rgba(255, 255, 255, 0) 100%
+  );
+}
+.glass-shine {
+  z-index: 3;
+  opacity: 0;
+  background-image: radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 70%);
+  transition: opacity 200ms ease-out;
+}
+.avatar:hover .glass-shine {
+  opacity: 0.6;
+}
+.avatar:active .glass-shine {
+  opacity: 1;
+}
+.panel .glass-shine {
+  display: none;
+}
+
+/* The card's glass panel. The border beam (beam.generated.css) rides its edge while Glance works;
+   bubble.ts sets data-active and data-fading. The entrance is a transition, because the beam owns
+   the panel's `animation`. */
+.panel {
+  --glass-tint: rgba(11, 11, 16, 0.84);
+  width: min(372px, calc(100vw - 56px));
+  border-radius: var(--gb-radius);
+  box-shadow: var(--gb-shadow);
+  transform-origin: bottom right;
+  transition: opacity 220ms cubic-bezier(0.2, 0.8, 0.2, 1), translate 220ms cubic-bezier(0.2, 0.8, 0.2, 1), scale 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@starting-style {
+  .panel {
+    opacity: 0;
+    translate: 0 10px;
+    scale: 0.98;
+  }
+}
+.panel:has(> .card[hidden]) {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel { transition: none; }
+}
+.card {
+  position: relative;
+  z-index: 1;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.card[hidden] {
+  display: none;
+}
+/* Push-to-talk: what Glance heard, or its answer, above the card it was said over. */
+.voice {
+  margin: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--gb-border-soft);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--gb-text-3);
+}
+.voice[data-voice="reply"] {
+  color: var(--gb-fg);
+}
+.voice[data-voice="listening"]::before,
+.say[data-voice="listening"]::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 8px;
+  border-radius: 999px;
+  background: var(--gb-accent);
+  vertical-align: 1px;
+  animation: gb-listen 1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice::before,
+  .say::before {
+    animation: none !important;
+  }
+}
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.say {
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+  color: var(--gb-fg);
+}
+.sub {
+  color: var(--gb-text-3);
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  margin: 0;
+}
+.sub a {
+  color: var(--gb-accent-text);
+  text-decoration: none;
+}
+.sub a:hover {
+  color: #c3d3ff;
+}
+.close {
+  border: 0;
+  background: transparent;
+  color: var(--gb-muted);
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  margin: -2px -4px 0 0;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  transition: background-color 100ms ease-out, color 100ms ease-out;
+}
+.close:hover {
+  background: #22222c;
+  color: var(--gb-fg);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chip {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--gb-border-solid);
+  background: var(--gb-chip);
+  color: var(--gb-text-2);
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  transition: background-color 100ms ease-out, border-color 100ms ease-out, color 100ms ease-out;
+}
+.chip:hover {
+  border-color: #45455a;
+}
+.chip[aria-pressed="true"] {
+  background: var(--gb-accent);
+  border-color: var(--gb-accent);
+  color: var(--gb-accent-fg);
+}
+.chip.custom {
+  width: 92px;
+  padding: 0;
+  overflow: hidden;
+}
+.chip.custom input {
+  width: 100%;
+  height: 100%;
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  text-align: center;
+  font: inherit;
+  color: inherit;
+  padding: 0 8px;
+}
+.chip.custom input::placeholder {
+  color: var(--gb-muted-2);
+}
+.chip.custom input:focus {
+  outline: none;
+}
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.primary {
+  flex: 1 1 140px;
+  height: 42px;
+  border-radius: 12px;
+  border: 0;
+  background: var(--gb-accent);
+  color: var(--gb-accent-fg);
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  transition: background-color 100ms ease-out, transform 100ms ease-out;
+}
+.primary:hover {
+  background: var(--gb-accent-hover);
+}
+.primary:active {
+  transform: translateY(1px);
+}
+.primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.ghost {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.085);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  color: var(--gb-text-2);
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: border-color 100ms ease-out, color 100ms ease-out;
+}
+.ghost:hover {
+  border-color: #45455a;
+  color: var(--gb-fg);
+}
+.ghost:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.ghost.wide {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 40px;
+  color: var(--gb-fg);
+}
+.counter {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 0 0 0 10px;
+  border-left: 2px solid rgba(255, 159, 69, 0.55);
+  color: var(--gb-text-3);
+  font-size: 12.5px;
+  line-height: 1.45;
+  animation: gb-counter-in 240ms ease-out;
+}
+.counter-text {
+  flex: 1;
+}
+.counter-src {
+  color: var(--gb-accent-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.counter-x {
+  background: none;
+  border: 0;
+  color: var(--gb-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.counter-x:hover {
+  color: var(--gb-fg);
+}
+@keyframes gb-counter-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+.status {
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  color: var(--gb-text-3);
+}
+.status:empty {
+  display: none;
+}
+.status.ok {
+  color: var(--gb-success);
+  font-weight: 500;
+}
+.status.err {
+  color: var(--gb-fg);
+}
+.status.busy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--gb-text-2);
+  font-size: 14px;
+}
+.status.busy::before {
+  content: "";
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid var(--gb-border-solid);
+  border-top-color: var(--gb-accent);
+  animation: gb-spin 700ms linear infinite;
+  flex: 0 0 auto;
+}
+.foot {
+  margin: 0;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  color: #a3a3b0;
+}
+.foot .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--gb-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.foot .link:disabled {
+  color: #a3a3b0;
+  cursor: default;
+  text-decoration: none;
+}
+.done {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.done .tick {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: rgba(111, 227, 159, 0.16);
+  color: var(--gb-success);
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  flex: 0 0 auto;
+}
+.sources {
+  margin: 0;
+  padding: 12px 0 0 16px;
+  border-top: 1px solid var(--gb-border-soft);
+  font-size: 12px;
+  color: var(--gb-muted);
+}
+.sources a {
+  color: var(--gb-accent-text);
+  text-decoration: none;
+}
+.sources a:hover {
+  color: #c3d3ff;
+}
+.kbd {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  border: 1px solid var(--gb-border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: var(--gb-text-2);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+/* Hover mini-card for passive underlines */
+.mini {
+  position: fixed;
+  z-index: 2147483000;
+  background: var(--gb-bg);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  color: var(--gb-fg);
+  border: 1px solid var(--gb-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  padding: 8px 10px 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  pointer-events: auto;
+  animation: gb-in 160ms ease-out both;
+}
+.mini[hidden] {
+  display: none;
+}
+.mini strong {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.mini .price {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--gb-text-2);
+}
+.mini .delta {
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  color: var(--gb-muted);
+}
+.mini .delta.up { color: var(--gb-success); }
+.mini .delta.down { color: var(--gb-danger); }
+.mini .go {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 0;
+  background: var(--gb-accent);
+  color: var(--gb-accent-fg);
+  font-weight: 700;
+  font-size: 12.5px;
+}
+.mini .go:hover {
+  background: var(--gb-accent-hover);
+}
+
+/* "Show me": the explanation card, one spoken segment per paragraph, revealed as it is said. */
+.asked {
+  font-family: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 12.5px;
+  color: var(--gb-muted);
+}
+.explain {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(46vh, 360px);
+  overflow-y: auto;
+}
+.step {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--gb-text-3);
+  transition: color 200ms ease-out;
+}
+.step[aria-current] {
+  color: var(--gb-fg);
+}
+
+/* The marks Glance draws over the page while it explains (sketch.ts). Each path has a unit length,
+   so the dash offset running from 1 to 0 draws it in; a dark halo under the ink keeps it readable
+   on light and dark pages alike. */
+.sketch {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 2147482999;
+}
+.sketch .mark {
+  transition: opacity 300ms ease-out;
+}
+.sketch .mark.fading {
+  opacity: 0;
+}
+.sketch .ink,
+.sketch .halo {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: sketch-draw 650ms cubic-bezier(0.4, 0, 0.2, 1) var(--delay, 0ms) forwards;
+}
+.sketch .ink {
+  stroke: #7aa2ff;
+  stroke-width: 3.2px;
+}
+.sketch .halo {
+  stroke: rgba(6, 8, 16, 0.42);
+  stroke-width: 7px;
+}
+.sketch .ink.marker {
+  stroke: rgba(91, 140, 255, 0.32);
+  stroke-linecap: butt;
+  animation-duration: 520ms;
+}
+.sketch .note-text {
+  font-family: "Caveat", "Segoe Print", "Bradley Hand", cursive;
+  font-weight: 700;
+  font-size: 27px;
+  fill: #9ab8ff;
+  paint-order: stroke;
+  stroke: rgba(6, 8, 16, 0.6);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  clip-path: inset(0 100% 0 0);
+  animation: sketch-write 700ms ease-out var(--delay, 0ms) forwards;
+}
+.sketch .arrow-label {
+  font-size: 23px;
+}
+@keyframes sketch-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes sketch-write {
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sketch .ink,
+  .sketch .halo {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .sketch .note-text {
+    animation: none;
+    clip-path: none;
+  }
+}
+
+/* Where Glance clicks: a ring that swells and fades around a dot. */
+.sketch .tap circle {
+  fill: none;
+  stroke: #7aa2ff;
+  stroke-width: 3px;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: sketch-tap 800ms ease-out forwards;
+}
+.sketch .tap .dot {
+  fill: #7aa2ff;
+  stroke: rgba(6, 8, 16, 0.5);
+  stroke-width: 2px;
+}
+@keyframes sketch-tap {
+  from { opacity: 1; transform: scale(0.4); }
+  to { opacity: 0; transform: scale(2.2); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sketch .tap circle { animation: none; opacity: 0.8; }
+}
+
+/* Chart marks: a price level, a shaded zone between two prices, a trend line, each with a small label. */
+.sketch .band {
+  fill: rgba(91, 140, 255, 0.16);
+  opacity: 0;
+  animation: sketch-fade-in 500ms ease-out var(--delay, 0ms) forwards;
+}
+.sketch .chart-label {
+  font-size: 22px;
+}
+@keyframes sketch-fade-in {
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sketch .band { animation: none; opacity: 1; }
+}
+.skills-used {
+  margin: 0;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  color: var(--gb-muted-2);
+}
+.status[hidden] {
+  display: none;
+}
+
+/* Several tokens of one company (xStocks, PreStocks, Tessera): pick one; premium is against the issuer's mark. */
+.tokens {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.token {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas: "sym px prem" "iss px prem";
+  column-gap: 12px;
+  align-items: center;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--gb-border-solid);
+  background: var(--gb-chip);
+  color: var(--gb-text-2);
+  transition: border-color 100ms ease-out, background-color 100ms ease-out;
+}
+.token:hover {
+  border-color: #45455a;
+}
+.token[aria-checked="true"] {
+  border-color: var(--gb-accent);
+  background: rgba(91, 140, 255, 0.14);
+  color: var(--gb-fg);
+}
+.t-sym {
+  grid-area: sym;
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.t-iss {
+  grid-area: iss;
+  font-size: 11.5px;
+  color: var(--gb-muted);
+}
+.t-px {
+  grid-area: px;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.t-prem {
+  grid-area: prem;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--gb-muted);
+  min-width: 92px;
+  text-align: right;
+}
+.t-prem.over {
+  color: var(--gb-warn);
+}
+.t-prem.under {
+  color: var(--gb-success);
+}
+.badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(91, 140, 255, 0.5);
+  color: var(--gb-accent-text);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  vertical-align: 1px;
+}
