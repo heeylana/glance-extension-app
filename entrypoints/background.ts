@@ -9,6 +9,7 @@ import { browser } from "wxt/browser";
 import { ApiClient } from "../lib/api";
 import { toBase64 } from "../lib/audio";
 import { openMicSetup } from "../lib/mic";
+import { SESSION_TOKEN_KEY } from "../lib/config";
 import type { BgRequest, RecorderRequest, RecorderStart, RecorderTake, TabMessage } from "../lib/messages";
 import type { Dictionary, VoiceResult } from "../lib/api-types";
 
@@ -21,7 +22,12 @@ const ttsCache = new Map<string, { audio: string; mime: string }>();
 
 async function getTokens(): Promise<{ accessToken: string | null }> {
   const r = (await browser.storage.session.get(TOKENS_KEY)) as Record<string, { accessToken: string | null } | undefined>;
-  return r[TOKENS_KEY] ?? { accessToken: null };
+  if (r[TOKENS_KEY]?.accessToken) return r[TOKENS_KEY]!;
+  // storage.session is wiped whenever the extension reloads or the browser restarts, and only the side
+  // panel refills it. Fall back to the sign-in it saved, so pages keep working without opening the panel
+  // first (otherwise every call is AUTH_INVALID and every underline says "not on-chain").
+  const saved = (await browser.storage.local.get(SESSION_TOKEN_KEY)) as Record<string, string | undefined>;
+  return { accessToken: saved[SESSION_TOKEN_KEY] ?? null };
 }
 
 const api = new ApiClient(getTokens);

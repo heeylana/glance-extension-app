@@ -1,6 +1,7 @@
 /**
  * Site adapters (spec §7.3): what to send the backend for X, YouTube, and a
- * generic article. Text is capped at ~4k characters around the viewport.
+ * generic article. Text is ~4k characters around the viewport; an article then adds the rest of
+ * its text in reading order, up to 8k, so every company it names can be offered.
  */
 import type { GlanceInput } from "./api-types";
 
@@ -15,6 +16,8 @@ export function detectSite(url = location.href): Site {
 }
 
 const TEXT_CAP = 4000;
+/** Articles: the viewport's text, then the rest of the article, up to what the backend reads (8,000). */
+const ARTICLE_CAP = 8000;
 
 function clean(s: string | null | undefined): string {
   return (s ?? "").replace(/\s+/g, " ").trim();
@@ -48,14 +51,14 @@ export function visibleText(root: ParentNode = document.body, cap = TEXT_CAP): s
 
 /**
  * The whole readable text of the page in document order, not just what is near the viewport: for
- * "remember this page", which should keep the article's facts wherever they sit. The main article
- * when there is one, capped.
+ * "remember this page", which should keep the article's facts wherever they sit, and for a glance at
+ * an article, after the text near the viewport (`seed`), so a company named further down still counts.
+ * The main article when there is one, capped.
  */
-export function readableText(cap = 12_000): string {
-  const root = document.querySelector("article, main, [role='main']") ?? document.body;
+export function readableText(cap = 12_000, root: ParentNode = document.querySelector("article, main, [role='main']") ?? document.body, seed = ""): string {
   const blocks = Array.from(root.querySelectorAll<HTMLElement>("h1,h2,h3,p,li,blockquote,figcaption,td,[data-testid='tweetText'],yt-formatted-string,span[dir]"));
-  const seen = new Set<string>();
-  let out = "";
+  const seen = new Set<string>(seed ? seed.split("\n") : []);
+  let out = seed;
   for (const el of blocks) {
     if (el.closest("nav,footer,aside,[role='navigation'],[aria-hidden='true'],glance-bubble")) continue;
     const t = clean(el.innerText);
@@ -143,7 +146,9 @@ function articleAdapter(): Partial<GlanceInput> {
   const title = meta("og:title") ?? clean(document.querySelector("h1")?.textContent) ?? document.title;
   const published = meta("article:published_time") ?? meta("datePublished") ?? document.querySelector<HTMLTimeElement>("article time[datetime], time[datetime]")?.dateTime;
   const root = document.querySelector("article, main, [role='main']") ?? document.body;
-  return { title, text: visibleText(root), publishedAt: published, url: document.querySelector<HTMLLinkElement>("link[rel='canonical']")?.href ?? location.href };
+  // What the reader is looking at first, then the rest of the article: a story about Google that names
+  // Nvidia and OpenAI further down should offer them too.
+  return { title, text: readableText(ARTICLE_CAP, root, visibleText(root)), publishedAt: published, url: document.querySelector<HTMLLinkElement>("link[rel='canonical']")?.href ?? location.href };
 }
 
 export function collectContext(): GlanceInput {

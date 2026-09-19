@@ -39,6 +39,8 @@ const WEAK_PRODUCTS = new Set([
 ]);
 /** Index funds are named in passing on most finance pages; they count only when the page is about them. */
 const INCIDENTAL_IDS = new Set(["spy", "qqq", "gld", "tlt"]);
+/** Names that stay ordinary words even capitalised ("CBS News"): only with other evidence. Mirrors the backend's match.ts. */
+const GENERIC_NAMES = new Set(["news"]);
 const WEAK_PRODUCT_WEIGHT = 0.5;
 const FINANCE_CONTEXT =
   /(?<![a-z])(shares?|stocks?|earnings|revenue|ceo|cfo|quarter|q[1-4]|guidance|nasdaq|nyse|market cap|ipo|analysts?|price target|upgrade|downgrade|dividend|buyback|valuation|investors?|profit|margins?|rally|sell ?off|premarket|after hours|wall street)(?![a-z])/i;
@@ -173,6 +175,7 @@ function score(c: Candidate, finance: boolean, text: string): number {
       else if (cs === "proper") w = finance ? 0.9 : 0.75;
       else if (cs === "caps") w = finance ? 0.9 : 0.45;
       else w = finance ? 0.6 : 0.45;
+      if (GENERIC_NAMES.has(h.text) && strongKinds.size < 2) w = 0.3;
     }
     if ((h.kind === "name" || h.kind === "alias") && INCIDENTAL_IDS.has(c.company.id) && !c.inTitle && c.mentions < 3) w = 0.6;
     kinds.set(h.kind, Math.max(kinds.get(h.kind) ?? 0, w));

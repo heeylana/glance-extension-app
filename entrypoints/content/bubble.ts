@@ -330,8 +330,10 @@ export class Bubble {
       this.show("untokenized");
       const line = `That's ${e.name}. It's not available on-chain yet. Want me to tell you when it is?`;
       this.card.innerHTML = `<div class="head"><p class="say">${esc(line)}</p>${closeBtn()}</div>
-        <div class="row"><button class="primary" data-act="watch">Tell me when</button><button class="ghost" data-act="close">No thanks</button></div>`;
+        <div class="row"><button class="primary" data-act="watch">Tell me when</button><button class="ghost" data-act="close">No thanks</button></div>
+        ${this.alsoRow(e)}`;
       this.wireClose();
+      this.wireAlso(e);
       this.card.querySelector("[data-act=close]")!.addEventListener("click", () => this.close());
       this.card.querySelector<HTMLButtonElement>("[data-act=watch]")!.addEventListener("click", async (ev) => {
         const btn = ev.currentTarget as HTMLButtonElement;
@@ -374,9 +376,11 @@ export class Bubble {
       ).join("")}<label class="chip custom"><span class="sr-only"></span><input type="number" inputmode="decimal" min="1" step="1" placeholder="$ custom" aria-label="Custom amount in dollars"></label></div>
       <div class="row"><button class="primary" data-act="buy">Buy $${this.amount} of ${esc(e.name)}</button><button class="ghost" data-act="why">Why did it move?</button></div>
       <p class="status" data-role="status" aria-live="polite"></p>
+      ${this.alsoRow(e)}
       <p class="foot">Spends from your vault${this.rememberLink(" · ")}</p>`;
     this.wireClose();
     this.wireRemember();
+    this.wireAlso(e);
     void this.loadCounterView(e);
     const buyBtn = this.card.querySelector<HTMLButtonElement>("[data-act=buy]")!;
     const status = this.card.querySelector<HTMLParagraphElement>("[data-role=status]")!;
@@ -720,6 +724,27 @@ export class Bubble {
   status(line: string) {
     if (this.shown === "closed" && !this.voiceCard) this.openVoiceCard(line);
     this.voiceLine(line, "listening");
+  }
+
+  /** The other companies this glance found, beside the one on the card: tap one to open its card instead. */
+  private alsoOf(e: GlanceEntity): GlanceEntity[] {
+    return (this.result?.entities ?? []).filter((x) => x.companyId !== e.companyId).slice(0, 4);
+  }
+
+  private alsoRow(e: GlanceEntity): string {
+    const others = this.alsoOf(e);
+    if (!others.length) return "";
+    return `<p class="foot also">Also on this page: ${others.map((x, i) => `<button class="link" type="button" data-also="${i}">${esc(x.name)}</button>`).join(" · ")}</p>`;
+  }
+
+  private wireAlso(e: GlanceEntity) {
+    const others = this.alsoOf(e);
+    this.card.querySelectorAll<HTMLButtonElement>("[data-also]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const next = others[Number(b.dataset.also)];
+        if (next) this.showEntity(next);
+      }),
+    );
   }
 
   private rememberLink(sep: string): string {

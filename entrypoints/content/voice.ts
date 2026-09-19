@@ -9,8 +9,8 @@ import type { VoiceCommand, VoiceContext } from "../../lib/api-types";
 
 export interface VoiceDeps {
   bubble: Bubble;
-  /** Read the page and show the result, as ⌥G does. */
-  glance: () => Promise<void>;
+  /** Read the page and show the result, as ⌥G does; with a company id, that company leads ("glance Anthropic"). */
+  glance: (focus?: string) => Promise<void>;
   saveNote: (journalId: number, note: string) => Promise<boolean>;
   /** Hold a note for the buy the user is about to make. */
   keepNote: (note: string) => void;
@@ -40,7 +40,7 @@ export async function runCommand(cmd: VoiceCommand, before: VoiceContext, d: Voi
 
   switch (cmd.kind) {
     case "glance":
-      return d.glance();
+      return d.glance(cmd.companyId ?? undefined);
 
     case "list":
       if (b.showChoices()) return;

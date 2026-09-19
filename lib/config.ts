@@ -7,6 +7,8 @@ export const SOLANA_RPC_URL =
   (import.meta.env.WXT_SOLANA_RPC_URL as string | undefined) ??
   (SOLANA_CLUSTER === "devnet" ? "https://api.devnet.solana.com" : "https://api.mainnet-beta.solana.com");
 export const USDC_MINT = (import.meta.env.WXT_USDC_MINT as string | undefined) ?? "";
+/** Where the side panel saves the signed-in session (chrome.storage.local); the background falls back to it. */
+export const SESSION_TOKEN_KEY = "glance:session";
 
 export const AMOUNT_CHIPS = [5, 10, 25] as const;
 export const DEFAULT_DAILY_CAP_USD = 20;

@@ -14,6 +14,35 @@ const LANDMARKS = "h1,h2,h3,h4,table,canvas,video,figure,[role=tab],[role=tablis
 
 const TEXT_BLOCKS = "h1,h2,h3,h4,h5,h6,p,li,td,th,dt,dd,blockquote,figcaption,caption,label,button,a,summary,[role=button],[role=link],[role=heading],[role=cell]";
 const MEDIA_AND_CONTROLS = "img,svg,canvas,video,iframe,input,select,textarea,[role=img]";
+/** Body text that is only mapped off screen when it contains a word the question names. */
+const PROSE = "p,li,td,th,dd,blockquote,figcaption,h5,h6";
+/** At most this many off-screen matches for the question's words. */
+const MAX_MATCHES = 12;
+
+const STOP = new Set(
+  "the a an and or of to in on at for from with by about is are was were be it its this that these those me my you your i we our can could would should will please show point find take go scroll highlight circle locate underline where what which who how why when tell explain look glance over part page site article mentioned mention talk talks talking says said so do does did has have had there here any some much many just also then than".split(" "),
+);
+
+/**
+ * The words in a question worth finding on the page: "point me to Anthropic" → ["anthropic"]. Mirrors
+ * `questionTerms` in the backend's services/explain.ts, which keeps those matches in the prompt.
+ */
+export function questionTerms(question: string): string[] {
+  const words = question.toLowerCase().replace(/['’]s\b/g, "").match(/[\p{L}\p{N}][\p{L}\p{N}&.-]*/gu) ?? [];
+  return [...new Set(words.filter((w) => w.length >= 3 && !STOP.has(w)))].slice(0, 8);
+}
+
+/** At most `max` characters of `text` around the first question word in it, so the model sees the match. */
+export function snippetAround(text: string, terms: string[], max = 160): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  const lower = t.toLowerCase();
+  const hits = terms.map((w) => lower.indexOf(w)).filter((i) => i >= 0);
+  if (!hits.length) return t.slice(0, max);
+  const body = max - 2;
+  const start = Math.max(0, Math.min(Math.min(...hits) - 40, t.length - body));
+  return `${start > 0 ? "…" : ""}${t.slice(start, start + body)}${start + body < t.length ? "…" : ""}`;
+}
 
 export interface PageMap {
   elements: ExplainElement[];
@@ -41,15 +70,23 @@ function kindOf(el: Element): string {
   return "text";
 }
 
+/** An element's text for the map, at most 160 characters (the backend's limit), images and inputs included. */
 function textOf(el: Element): string {
-  if (el instanceof HTMLImageElement) return el.alt || el.title || "";
-  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return el.value || el.placeholder || "";
+  const clip = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 160);
+  // Image descriptions can run long (a news photo's alt text is often a full caption).
+  if (el instanceof HTMLImageElement) return clip(el.alt || el.title || "");
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return clip(el.value || el.placeholder || "");
   const label = el.getAttribute("aria-label");
   const t = (el.textContent ?? "").replace(/\s+/g, " ").trim();
-  return (t || label || el.getAttribute("title") || "").slice(0, 160);
+  return clip(t || label || el.getAttribute("title") || "");
 }
 
-export function mapPage(): PageMap {
+/**
+ * `terms`: words from the question (questionTerms). Elements that contain one are mapped even deep off
+ * screen, paragraphs included, and their text is cut around the match, so "point me to Anthropic" can
+ * scroll to a mention far down the page.
+ */
+export function mapPage(terms: string[] = []): PageMap {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const scale = Math.min(1, MAP_MAX_WIDTH / vw);
@@ -73,8 +110,11 @@ export function mapPage(): PageMap {
 
   const visible = [...found.entries()].sort(([, a], [, b]) => a.top - b.top || a.left - b.left).slice(0, MAX_ELEMENTS);
 
-  // Beyond the viewport: headings, tables, charts and controls first, then links, nearest first.
-  const rank = (el: Element) => (/^(H[1-4]|TABLE|CANVAS|VIDEO|FIGURE)$/.test(el.tagName) ? 0 : el.matches("[role=tab],[role=tablist],summary,[aria-expanded]") ? 1 : el.tagName === "BUTTON" ? 2 : 3);
+  const fullText = (el: Element) => (el.textContent ?? "").replace(/\s+/g, " ").trim();
+  const names = (el: Element) => terms.length > 0 && terms.some((w) => fullText(el).toLowerCase().includes(w));
+  // Beyond the viewport: what the question names first, then headings, tables, charts and controls, then links, nearest first.
+  const rank = (el: Element) =>
+    names(el) ? -1 : /^(H[1-4]|TABLE|CANVAS|VIDEO|FIGURE)$/.test(el.tagName) ? 0 : el.matches("[role=tab],[role=tablist],summary,[aria-expanded]") ? 1 : el.tagName === "BUTTON" ? 2 : 3;
   const offscreen: [Element, DOMRect][] = [];
   for (const el of document.querySelectorAll(LANDMARKS)) {
     if (found.has(el) || el.closest("glance-bubble,nav,footer,[aria-hidden='true']")) continue;
@@ -82,6 +122,17 @@ export function mapPage(): PageMap {
     if (r.width < 4 || r.height < 4 || (r.bottom > 0 && r.top < vh)) continue;
     if (!textOf(el) && !/^(TABLE|CANVAS|VIDEO|FIGURE)$/.test(el.tagName)) continue;
     offscreen.push([el, r]);
+  }
+  if (terms.length) {
+    let matches = 0;
+    for (const el of document.querySelectorAll(PROSE)) {
+      if (matches >= MAX_MATCHES) break;
+      if (found.has(el) || el.closest("glance-bubble,nav,footer,[aria-hidden='true']")) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 4 || r.height < 4 || (r.bottom > 0 && r.top < vh) || !names(el)) continue;
+      offscreen.push([el, r]);
+      matches++;
+    }
   }
   const distance = (r: DOMRect) => (r.top >= vh ? r.top - vh : -r.bottom);
   offscreen.sort(([a, ra], [b, rb]) => rank(a) - rank(b) || distance(ra) - distance(rb));
@@ -97,7 +148,7 @@ export function mapPage(): PageMap {
     const w = Math.min(vw, r.right) - x;
     const h = onScreen ? Math.min(vh, r.bottom) - y : r.height;
     const box: [number, number, number, number] = [Math.round(x * scale), Math.round(y * scale), Math.round(w * scale), Math.round(h * scale)];
-    return { id, kind: kindOf(el), text: textOf(el), box };
+    return { id, kind: kindOf(el), text: names(el) ? snippetAround(fullText(el), terms) : textOf(el), box };
   });
   return { elements, nodes, scale, size: { w: Math.round(vw * scale), h: Math.round(vh * scale) }, scroll: { x: window.scrollX, y: window.scrollY } };
 }

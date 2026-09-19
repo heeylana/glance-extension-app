@@ -11,9 +11,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { browser } from "wxt/browser";
 import { ApiClient, isApiError } from "./api";
-import { BACKEND_URL, CONSOLE_URL } from "./config";
+import { BACKEND_URL, CONSOLE_URL, SESSION_TOKEN_KEY } from "./config";
 
-const TOKEN_KEY = "glance:session";
+const TOKEN_KEY = SESSION_TOKEN_KEY;
 
 export interface GlanceAuth {
   ready: boolean;

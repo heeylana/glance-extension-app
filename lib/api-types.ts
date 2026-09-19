@@ -15,6 +15,8 @@ export interface GlanceInput {
   text: string;
   captions?: string;
   context?: { url?: string; title?: string; site?: string; screenshotHash?: string; note?: string };
+  /** The company the user hovered and asked to glance ("Glance this" on its underline): it leads the answer. */
+  focus?: string;
 }
 
 export interface GlanceEntity {

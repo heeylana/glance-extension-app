@@ -77,3 +77,15 @@ describe("extension matcher: dominance and ambiguity (mirrors the backend rules)
     expect(top("apple shares getting hammered premarket after that guidance cut")!.confidence).toBeLessThan(0.8);
   });
 });
+
+describe("extension matcher: another outlet's name is not the company (mirrors the backend)", () => {
+  const news: DictionaryCompany = { id: "nws", name: "News", ticker: "NWS", aliases: ["news corp"], products: [], execs: ["rupert murdoch"], tokenized: true, ambiguousName: true };
+  const mm = new Matcher([...companies, news]);
+  it("CBS News is not News Corp, even in a finance story", () => {
+    const c = mm.candidates("Nvidia's CEO told CBS News that shares would rally").find((x) => x.company.id === "nws");
+    expect(c === undefined || c.confidence < 0.8).toBe(true);
+  });
+  it("still News Corp with other evidence", () => {
+    expect(mm.candidates("Rupert Murdoch's News said earnings rose").find((x) => x.company.id === "nws")!.confidence).toBeGreaterThanOrEqual(0.8);
+  });
+});

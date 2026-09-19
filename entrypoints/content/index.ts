@@ -11,10 +11,10 @@ import { keepNote, loadNotes } from "../../lib/memory-store";
 import { Bubble } from "./bubble";
 import { runCommand } from "./voice";
 import { Sketch } from "./sketch";
-import { MAP_MAX_WIDTH, mapPage, shrinkScreenshot, type PageMap } from "../../lib/page-map";
+import { MAP_MAX_WIDTH, mapPage, questionTerms, shrinkScreenshot, type PageMap } from "../../lib/page-map";
 import { clickLikeAPerson, clickTarget, inView, labelOf, newTabHref, refusal, scrollScreen, scrollToElement } from "./act";
 import type { BgRequest, BgResponse, TabMessage } from "../../lib/messages";
-import type { ApiError, Dictionary, DictionaryCompany, ExplainAction, ExplainMemory, ExplainStep, GlanceEntity, GlanceInput, GlanceResult, PriceRow } from "../../lib/api-types";
+import type { ApiError, Dictionary, DictionaryCompany, ExplainAction, ExplainMemory, ExplainStep, GlanceEntity, GlanceInput, GlanceResult, PriceRow, SketchMark } from "../../lib/api-types";
 import { usd } from "../../lib/format";
 
 const OFFLINE = "Glance is offline right now. Your money is safe in your account.";
@@ -204,13 +204,14 @@ export default defineContentScript({
     /** A spoken "note: …" said on the buy card, saved with the next buy (spec §7.5 step 7). */
     let pendingNote: string | null = null;
     let busy = false;
-    async function glance() {
+    /** Read the page and show its company. `focus`: a company id the user hovered and asked about, which leads. */
+    async function glance(focus?: string) {
       if (!bubble || busy) return;
       busy = true;
       pendingNote = null;
       try {
         bubble.thinking();
-        const input = collectContext();
+        const input = { ...collectContext(), ...(focus ? { focus } : {}) };
         lastContext = input.context;
         let res: GlanceResult | ApiError;
         if (!input.text || input.text.length < 10) {
@@ -386,6 +387,17 @@ export default defineContentScript({
       return { ...base, target: label, outcome: changed ? "done" : "failed" };
     }
 
+    /**
+     * Point at something off screen: scroll the first marked element that isn't in view into view before
+     * the segment's marks are drawn, so "point me to X" scrolls, then points. Marks follow the page, and
+     * pixel marks are pinned to where the screenshot was, so the rest still land. Off in Settings, it stays put.
+     */
+    async function reveal(marks: SketchMark[], map: PageMap) {
+      if (!act) return;
+      const node = marks.map((m) => (m.element ? map.nodes.get(m.element) : undefined)).find((n): n is Element => !!n && n.isConnected && !inView(n));
+      if (node) await scrollToElement(node);
+    }
+
     async function explain(question: string) {
       if (!bubble || !sketch) return;
       // Replacing an explanation card ends that explanation (onExplainEnd), so take the run number after.
@@ -395,6 +407,8 @@ export default defineContentScript({
       const run = ++explainRun;
       const history: ExplainStep[] = [];
       let shown = false;
+      // Words the question names ("point me to Anthropic"), so the map includes their mentions far down the page.
+      const terms = questionTerms(question);
       try {
         const memory = await relevantMemory(question).catch(() => []);
         for (let step = 0; step <= MAX_STEPS; step++) {
@@ -403,7 +417,7 @@ export default defineContentScript({
             bubble.explainWorking("searching");
             sketch.clear(true);
           }
-          const map = mapPage();
+          const map = mapPage(terms);
           // The same shot the page shows, without the bubble; its pixels and the map's boxes share one space.
           const shot = await bubble.withHidden(() => send({ type: "capture-visible-tab" })).catch(() => null);
           const image = shot?.ok ? await shrinkScreenshot(shot.dataUrl, map.size).catch(() => undefined) : undefined;
@@ -435,6 +449,8 @@ export default defineContentScript({
           for (const [i, seg] of res.segments.entries()) {
             if (run !== explainRun) return;
             bubble.explainStep(first + i);
+            await reveal(seg.marks, map);
+            if (run !== explainRun) return;
             seg.marks.forEach((m, j) => sketch!.draw(m, map, j * 450, res.chart));
             await say(seg.say);
           }
@@ -646,13 +662,30 @@ export default defineContentScript({
       const priceCache = new Map<string, { at: number; row: PriceRow }>();
       let current: string | null = null;
       let hideTimer: number | undefined;
+      // Moving from the word to the card crosses a small gap and often other underlined text under the
+      // card. While the pointer is on the card it stays put: no countdown, and no switching to whatever is
+      // underlined beneath it. Leaving the word or the card starts a short countdown, reset by each move.
+      let overMini = false;
+      const HIDE_MS = 400;
+      const scheduleHide = () => {
+        window.clearTimeout(hideTimer);
+        hideTimer = window.setTimeout(() => {
+          if (!overMini) mini.hidden = true;
+        }, HIDE_MS);
+      };
+      mini.addEventListener("pointerenter", () => {
+        overMini = true;
+        window.clearTimeout(hideTimer);
+      });
+      mini.addEventListener("pointerleave", () => {
+        overMini = false;
+        scheduleHide();
+      });
       const show = async (x: number, y: number) => {
+        if (overMini) return;
         const u = underliner?.at(x, y);
         if (!u) {
-          if (!mini.matches(":hover")) {
-            window.clearTimeout(hideTimer);
-            hideTimer = window.setTimeout(() => (mini.hidden = true), 250);
-          }
+          if (!mini.hidden) scheduleHide();
           return;
         }
         window.clearTimeout(hideTimer);
@@ -669,18 +702,23 @@ export default defineContentScript({
           }
           if (current !== u.company.id) return;
           const price = row?.priceUsd != null ? `$${row.priceUsd >= 100 ? row.priceUsd.toFixed(0) : row.priceUsd.toFixed(2)}` : "";
+          // Whether it trades comes from the price row when there is one, else from the dictionary: a failed
+          // price lookup (signed out, backend busy) must not read as "not on-chain".
+          const onChain = row ? row.tokenized : u.company.tokenized;
           mini.innerHTML = `<strong>${u.company.name}</strong>${
-            row?.tokenized ? `<span class="price">${price}</span><button class="go" type="button">Glance this</button>` : `<span class="delta">Not on-chain yet</span>`
+            onChain ? `${price ? `<span class="price">${price}</span>` : ""}<button class="go" type="button">Glance this</button>` : `<span class="delta">Not on-chain yet</span>`
           }`;
+          // Glance this company, not whatever the page is mainly about.
           mini.querySelector(".go")?.addEventListener("click", () => {
             mini.hidden = true;
-            void glance();
+            overMini = false;
+            void glance(u.company.id);
           });
         }
         const rect = u.range.getBoundingClientRect();
         const w = mini.offsetWidth || 220;
         mini.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, rect.left))}px`;
-        mini.style.top = `${rect.bottom + 6 + mini.offsetHeight > window.innerHeight ? rect.top - mini.offsetHeight - 6 : rect.bottom + 6}px`;
+        mini.style.top = `${rect.bottom + 4 + mini.offsetHeight > window.innerHeight ? rect.top - mini.offsetHeight - 4 : rect.bottom + 4}px`;
       };
       let raf = 0;
       window.addEventListener(
