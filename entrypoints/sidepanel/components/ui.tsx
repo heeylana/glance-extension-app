@@ -245,11 +245,11 @@ export function Dialog({ title, body, children, onClose }: { title: string; body
   );
 }
 
-/** Brand mark: the accent square with a G. */
+/** Brand mark: the Glance eye on the accent square (public/logo.svg). */
 export function Mark({ size = 18 }: { size?: number }) {
   return (
-    <span className="inline-flex items-center justify-center rounded-[5px] bg-primary font-bold text-primary-foreground" style={{ width: size, height: size, fontSize: Math.round(size * 0.61) }} aria-hidden>
-      G
+    <span className="inline-flex items-center justify-center rounded-[5px] bg-primary text-primary-foreground" style={{ width: size, height: size }} aria-hidden>
+      <img src="/logo.svg" alt="" style={{ width: Math.round(size * 0.74) }} className="brightness-0 invert" />
     </span>
   );
 }

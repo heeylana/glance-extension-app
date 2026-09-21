@@ -32,6 +32,8 @@ export interface GlanceEntity {
   priceAtPublishUsd?: number | null;
   deltaPct?: number | null;
   deltaQuality?: "exact" | "estimate" | null;
+  /** The day's move from the price feed; the card's chart takes its colour from this. */
+  changeTodayPct?: number | null;
   priceStale?: boolean;
   kind?: "stock" | "etf" | "pre-ipo";
   /** Every token of the company (xStocks, PreStocks, Tessera); the buy card lets the user pick one. */
@@ -240,12 +242,54 @@ export interface VoiceContext {
   amountUsd: number | null;
 }
 export interface VoiceCommand {
-  kind: "glance" | "list" | "buy" | "sell" | "amount" | "confirm" | "cancel" | "why" | "pick" | "watch" | "note" | "explain" | "scroll" | "balance" | "limit" | "holdings" | "remember" | "settings" | "unknown";
+  kind: "glance" | "list" | "buy" | "sell" | "amount" | "confirm" | "cancel" | "why" | "pick" | "watch" | "note" | "explain" | "scroll" | "balance" | "limit" | "holdings" | "stock" | "advice" | "remember" | "settings" | "unknown";
   amountUsd: number | null;
   companyId: string | null;
   note: string | null;
   direction: "up" | "down" | "top" | "bottom" | null;
   all: boolean | null;
+}
+/** What Birdeye says about the token's own market. Null fields where it had nothing. Keep in sync with glance-backend/src/services/birdeye.ts. */
+export interface TokenMarket {
+  priceUsd: number | null;
+  change24hPct: number | null;
+  volume24hUsd: number | null;
+  liquidityUsd: number | null;
+  marketCapUsd: number | null;
+  holders: number | null;
+  trades24h: number | null;
+  markets: number | null;
+}
+/** POST /company: one company asked about out loud, with the card that lets the user buy it. */
+export interface CompanyResult {
+  ok: true;
+  entity: GlanceEntity;
+  summary: string;
+  /** null without a Birdeye key, or when it was too slow for the spoken answer. */
+  market: TokenMarket | null;
+}
+/**
+ * POST /advice: what Glance makes of a company, from its price, its on-chain market and the week's
+ * news — what is happening, the case for, the case against, what to watch. Never a recommendation,
+ * and `disclaimer` is written by the backend, not the model, so it is always there.
+ */
+export interface AdviceResult {
+  ok: true;
+  entity: GlanceEntity;
+  summary: string;
+  market: TokenMarket | null;
+  lines: string[];
+  /** The lines plus the spoken disclaimer, one per clip: a whole read is too long for one. */
+  spokenLines: string[];
+  spoken: string;
+  disclaimer: string | null;
+  sources: { title: string; source: string; url: string; publishedAt: string }[];
+}
+/** POST /company/history: the day's hourly prices behind the card's little chart, and the market if it has caught up. */
+export interface CompanyHistory {
+  ok: true;
+  points: { t: number; usd: number }[];
+  market: TokenMarket | null;
 }
 export interface VoiceResult {
   ok: true;

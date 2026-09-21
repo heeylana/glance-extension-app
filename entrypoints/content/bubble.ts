@@ -7,9 +7,10 @@
  * for each kind of work), both the orb and the card are liquid glass, and the
  * card's border carries a beam while Glance is working.
  */
-import type { EntityListing, GlanceResult, GlanceEntity, BuyResult, ApiError, WhyResult, CounterViewResult, Holding, VoiceCompany, VoiceContext, VoiceView } from "../../lib/api-types";
+import type { EntityListing, GlanceResult, GlanceEntity, BuyResult, ApiError, WhyResult, CounterViewResult, Holding, TokenMarket, VoiceCompany, VoiceContext, VoiceView } from "../../lib/api-types";
 import { AMOUNT_CHIPS } from "../../lib/config";
-import { usd } from "../../lib/format";
+import { usd, usdShort, countShort } from "../../lib/format";
+import { spark, type SparkPoint } from "../../lib/spark";
 import { browser } from "wxt/browser";
 import { Orb, type OrbState } from "./orb";
 import { liquidGlass } from "./glass";
@@ -64,6 +65,10 @@ export interface BubbleHandlers {
 /** How long the orb must be held before it listens instead of glancing. */
 const HOLD_MS = 350;
 
+/** How many page loads show the hotkeys by themselves, and for how long. */
+const TIP_KEY = "glance:tips";
+const TIP_SHOWS = 3;
+const TIP_MS = 6_000;
 const POS_KEY = () => `glance:bubble-pos:${location.hostname}`;
 const CV_DISMISS_KEY = (ticker: string) => `glance:counter-view-dismissed:${ticker}`;
 const CV_DISMISS_MS = 24 * 60 * 60 * 1000;
@@ -102,6 +107,10 @@ export class Bubble {
   /** The card was opened just to listen, so the voice lines go in its headline. */
   private voiceCard = false;
   private listenFrom: BubbleState = "idle";
+
+  /** The small hint beside the orb: what the two hotkeys are. */
+  private tip!: HTMLDivElement;
+  private tipTimer = 0;
 
   constructor(container: HTMLElement, private h: BubbleHandlers) {
     try {
@@ -142,11 +151,66 @@ export class Bubble {
     this.orb = new Orb(40);
     this.avatar.append(this.orb.canvas);
     liquidGlass(this.avatar, { displacement: 20, aberration: 2, blurPx: 4, saturatePct: 140, elasticity: 0.35 });
-    this.root.append(this.panel, this.avatar);
+    this.tip = document.createElement("div");
+    this.tip.className = "tip";
+    this.tip.hidden = true;
+    this.tip.setAttribute("role", "note");
+    this.tip.innerHTML = `<span class="kbd">⌥G</span> glance<span class="tip-dot">·</span>hold <span class="kbd">⌥V</span> to talk`;
+    this.root.append(this.panel, this.tip, this.avatar);
     container.append(this.root);
     this.wireAvatar();
+    this.wireTip();
     this.restorePosition();
     this.setState("idle");
+  }
+
+  /**
+   * The hotkeys, beside the orb: on hover for as long as Glance is installed, and by itself the
+   * first few page loads so they are found without hovering. It never shows over an open card, and
+   * `learnedHotkeys()` stops the automatic showings for good once a hotkey has been used.
+   */
+  private wireTip() {
+    this.avatar.addEventListener("pointerenter", () => this.showTip());
+    this.avatar.addEventListener("pointerleave", () => this.hideTip());
+    this.avatar.addEventListener("focus", () => this.showTip());
+    this.avatar.addEventListener("blur", () => this.hideTip());
+    void this.autoTip();
+  }
+
+  private async autoTip() {
+    try {
+      const seen = Number((await browser.storage.local.get(TIP_KEY))[TIP_KEY] ?? 0);
+      if (seen >= TIP_SHOWS) return;
+      await browser.storage.local.set({ [TIP_KEY]: seen + 1 });
+      window.setTimeout(() => {
+        this.showTip();
+        this.tipTimer = window.setTimeout(() => this.hideTip(), TIP_MS);
+      }, 1200);
+    } catch {
+      /* no storage, no automatic hint; hovering still works */
+    }
+  }
+
+  /** The user pressed a hotkey, so they know: stop showing the hint by itself. */
+  static async learnedHotkeys() {
+    try {
+      await browser.storage.local.set({ [TIP_KEY]: TIP_SHOWS });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private showTip() {
+    if (this.view !== "closed" || this.state === "listening") return;
+    // Dragged near the left edge, the hint would run off it: put it on the other side of the orb.
+    const room = this.avatar.getBoundingClientRect().left;
+    this.tip.dataset.side = room < 250 ? "right" : "left";
+    this.tip.hidden = false;
+  }
+
+  private hideTip() {
+    window.clearTimeout(this.tipTimer);
+    this.tip.hidden = true;
   }
 
   /** Where the card and the orb are on screen, for marks to keep clear of. */
@@ -221,6 +285,7 @@ export class Bubble {
 
   /** Every render goes through here: the card is about to be replaced, so voice lines and the amount setter go with it. */
   private show(view: VoiceView) {
+    this.hideTip();
     if (this.shown === "explain" && view !== "explain") this.h.onExplainEnd?.();
     this.shown = view;
     this.voiceCard = false;
@@ -370,6 +435,8 @@ export class Bubble {
             .join("")}</div>`
         : "";
     this.card.innerHTML = `<div class="head"><div><p class="say" aria-live="polite">${esc(say)}</p><p class="sub">${sub}</p></div>${closeBtn()}</div>
+      <div class="chart" data-role="chart" hidden></div>
+      <div class="read" data-role="read" hidden></div>
       ${tokens}
       <div class="chips" role="group" aria-label="Amount">${AMOUNT_CHIPS.map(
         (a) => `<button class="chip" data-amt="${a}" aria-pressed="${a === this.amount}">$${a}</button>`,
@@ -488,6 +555,66 @@ export class Bubble {
    * The card that confirms a sell (spec §7.7, by voice or from the page): the position, the amount,
    * and a Sell button that is only ever pressed by the user, or by a spoken "yes" on this card.
    */
+  /**
+   * The day on one line, under the headline of the card that is already open (Birdeye, through
+   * /company/history): the price path drawn as it is spoken about, the day's range, and what the
+   * token's own market looks like. Called after the card is up, so nothing waits for it; with no
+   * points and no market there is nothing to show and the slot stays closed.
+   */
+  showChart(points: SparkPoint[], market: TokenMarket | null) {
+    const slot = this.card.querySelector<HTMLDivElement>("[data-role=chart]");
+    if (!slot) return;
+    const W = 320;
+    const H = 44;
+    const s = points.length ? spark(points, W, H) : null;
+    const facts = [
+      market?.volume24hUsd ? `<span>Vol <b>${usdShort(market.volume24hUsd)}</b></span>` : "",
+      market?.liquidityUsd ? `<span>Liquidity <b>${usdShort(market.liquidityUsd)}</b></span>` : "",
+      market?.holders ? `<span><b>${countShort(market.holders)}</b> holders</span>` : "",
+    ].filter(Boolean);
+    if (!s && !facts.length) return;
+    const chart = s
+      ? `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+           <defs><linearGradient id="gb-spark" x1="0" y1="0" x2="0" y2="1">
+             <stop class="spark-stop-top" offset="0%"/><stop class="spark-stop-bottom" offset="100%"/>
+           </linearGradient></defs>
+           <path class="spark-fill" d="${s.area}"/>
+           <path class="spark-line" pathLength="1" d="${s.line}"/>
+           <circle class="spark-dot" cx="${s.end.x}" cy="${s.end.y}" r="2.6"/>
+         </svg>
+         <p class="chart-range"><span>24h</span> <b>${usd(s.low)}</b> – <b>${usd(s.high)}</b></p>`
+      : "";
+    slot.innerHTML = `${chart}${facts.length ? `<p class="chart-meta">${facts.join("<span class=\"dot\">·</span>")}</p>` : ""}`;
+    // Red or blue follows the very number the spoken line used — the price feed's day move first,
+    // then Birdeye's, then the drawn line itself — so the card never says "down" over a blue chart.
+    const dayChange = this.entityRef?.changeTodayPct ?? market?.change24hPct ?? null;
+    const down = dayChange !== null ? dayChange < 0 : (s?.down ?? false);
+    if (down) slot.setAttribute("data-down", "");
+    else slot.removeAttribute("data-down");
+    slot.hidden = false;
+    // A day of prices, said out loud for anyone not looking at it.
+    if (s) slot.setAttribute("aria-label", `Last 24 hours: ${usd(s.first)} to ${usd(s.last)}, low ${usd(s.low)}, high ${usd(s.high)}`);
+    slot.setAttribute("role", "img");
+  }
+
+  /**
+   * The read, under the chart on the card that is already open: what is happening, then the case for
+   * and the case against, then what to watch, and last the disclaimer. The disclaimer comes from the
+   * backend and is shown whenever there is a read, never on its own and never edited here.
+   */
+  showRead(lines: string[], disclaimer: string | null) {
+    const slot = this.card.querySelector<HTMLDivElement>("[data-role=read]");
+    if (!slot || !lines.length) return;
+    const [now, forIt, against, watch] = lines;
+    const side = (text: string | undefined, kind: "for" | "against") =>
+      text ? `<p class="side" data-side="${kind}">${esc(text)}</p>` : "";
+    slot.innerHTML = `${now ? `<p class="read-now">${esc(now)}</p>` : ""}
+      ${side(forIt, "for")}${side(against, "against")}
+      ${watch ? `<p class="read-watch">Worth watching: ${esc(watch)}</p>` : ""}
+      ${disclaimer ? `<p class="read-note">${esc(disclaimer)}</p>` : ""}`;
+    slot.hidden = false;
+  }
+
   showSell(h: Holding, amount: { usd: number } | { all: true }) {
     this.show("sell");
     this.selling = h;

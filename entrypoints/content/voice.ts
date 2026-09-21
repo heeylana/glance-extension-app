@@ -19,6 +19,10 @@ export interface VoiceDeps {
   scroll: (direction: "up" | "down" | "top" | "bottom") => Promise<void>;
   /** Answer from the vault: cash, today's limit, or holdings (of one company, if named). */
   account: (kind: "balance" | "limit" | "holdings", companyId: string | null) => Promise<void>;
+  /** Answer a spoken question about a company: its price, the day's move, and its buy card. */
+  stock: (companyId: string) => Promise<void>;
+  /** Read a company back to the user: what's happening, both sides, and the disclaimer. */
+  advice: (companyId: string) => Promise<void>;
   /** Open the sell card for a position; the sale itself waits for "yes" or a tap. */
   sell: (companyId: string | null, amountUsd: number | null, all: boolean) => Promise<void>;
   /** Keep this page's facts in this browser for questions on other pages. */
@@ -155,6 +159,15 @@ export async function runCommand(cmd: VoiceCommand, before: VoiceContext, d: Voi
     case "limit":
     case "holdings":
       return d.account(cmd.kind, cmd.companyId);
+
+    case "stock":
+      // The grammar and sanitize both refuse a stock question with no company, so this is set.
+      if (!cmd.companyId) break;
+      return d.stock(cmd.companyId);
+
+    case "advice":
+      if (!cmd.companyId) break;
+      return d.advice(cmd.companyId);
 
     case "sell":
       return d.sell(cmd.companyId ?? (before.view === "sell" ? (before.current?.companyId ?? null) : null), cmd.amountUsd, cmd.all === true);

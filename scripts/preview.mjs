@@ -44,6 +44,9 @@ const shim = (signedIn) => `(() => {
     case "prices": return api("GET", "/prices?tickers=" + m.tickers.join(","));
     case "counter-view": return api("POST", "/counter-view", { ticker: m.ticker });
     case "why": return api("POST", "/why", { ticker: m.ticker });
+    case "company": return api("POST", "/company", { companyId: m.companyId, ticker: m.ticker });
+    case "company-history": return api("POST", "/company/history", { mint: m.mint });
+    case "advice": return api("POST", "/advice", { companyId: m.companyId, ticker: m.ticker });
     case "auth-status": return { signedIn: !!TOKEN };
     case "tts": return { ok: false, code: "TTS_UNAVAILABLE", message: "preview" };
     case "buy": return { ok: false, code: "PREVIEW", message: "Preview only. Nothing was spent." };
@@ -96,6 +99,19 @@ const shot = async (sessionId, name, clip) => { const s = await send("Page.captu
   await evaluate(p.sessionId, "document.querySelector('glance-bubble').shadowRoot.querySelector('.chips .chip')?.click()"); await sleep(7000);
   console.log("card:", JSON.stringify(await evaluate(p.sessionId, "document.querySelector('glance-bubble')?.shadowRoot?.querySelector('.card')?.innerText ?? '(no card)'")).slice(0, 160));
   await shot(p.sessionId, "page-buycard.png", { x: 700, y: 260, width: 480, height: 520 });
+  // The hotkey hint beside the orb (bubble.css .tip), shown by hovering it with the card closed.
+  await evaluate(p.sessionId, "document.querySelector('glance-bubble').shadowRoot.querySelector('.close')?.click()"); await sleep(600);
+  await evaluate(p.sessionId, "document.querySelector('glance-bubble').shadowRoot.querySelector('.avatar').dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }))"); await sleep(600);
+  await shot(p.sessionId, "page-hotkeys.png", { x: 700, y: 620, width: 480, height: 160 });
+  // A read: what Glance makes of the company, both sides, with its disclaimer.
+  const read = await evaluate(p.sessionId, `(async () => {
+    const b = document.querySelector('glance-bubble');
+    const r = await chrome.runtime.sendMessage({ type: 'advice', ticker: 'AAPL' });
+    if (!r?.ok) return 'advice failed: ' + JSON.stringify(r).slice(0, 120);
+    const inst = window.__glanceBubble;
+    return r.lines.length + ' lines';
+  })()`);
+  console.log("advice:", read);
   await send("Target.closeTarget", { targetId: p.targetId }); }
 if (logs.length) console.log("page exceptions:", logs.slice(0, 5));
 ws.close(); chrome.kill(); server.close();

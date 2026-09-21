@@ -826,3 +826,180 @@ a:focus-visible {
   letter-spacing: 0.02em;
   vertical-align: 1px;
 }
+
+/* The day's price path on the buy card (lib/spark.ts, Birdeye's hourly prices), drawn while Glance
+   talks about the stock: one line, a wash under it, and the numbers beside it. Accent for a day
+   that is up, the danger colour for one that is down. */
+.chart {
+  --spark: var(--gb-accent);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chart[hidden] {
+  display: none;
+}
+.chart svg {
+  display: block;
+  width: 100%;
+  height: 44px;
+  overflow: visible;
+}
+/* The wash fades out downwards, so the line reads as the subject and not the block under it. */
+.spark-fill {
+  fill: url(#gb-spark);
+  stroke: none;
+}
+.spark-stop-top {
+  stop-color: var(--spark);
+  stop-opacity: 0.3;
+}
+.spark-stop-bottom {
+  stop-color: var(--spark);
+  stop-opacity: 0;
+}
+.spark-line {
+  fill: none;
+  stroke: var(--spark);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: gb-spark-draw 620ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.spark-dot {
+  fill: var(--spark);
+  opacity: 0;
+  animation: gb-spark-dot 200ms ease-out 560ms forwards;
+}
+.chart[data-down] {
+  --spark: var(--gb-danger);
+}
+.chart-range,
+.chart-meta {
+  margin: 0;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--gb-muted);
+}
+.chart-range b,
+.chart-meta b {
+  font-weight: 500;
+  color: var(--gb-text-2);
+}
+.chart-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+}
+.chart-meta .dot {
+  color: var(--gb-muted-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .spark-line {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .spark-dot {
+    animation: none;
+    opacity: 1;
+  }
+}
+@keyframes gb-spark-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes gb-spark-dot {
+  to {
+    opacity: 1;
+  }
+}
+
+/* "What do you think of Nvidia?" (services/advice.ts): what's happening, then the case for and the
+   case against against their own rules, then what to watch, then the disclaimer that always closes
+   a read. Deliberately quiet: this is Glance thinking out loud, not a recommendation. */
+.read {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.read[hidden] {
+  display: none;
+}
+.read p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--gb-text-3);
+}
+.read .read-now {
+  color: var(--gb-fg);
+}
+.read .side {
+  padding-left: 10px;
+  border-left: 2px solid var(--gb-border-solid);
+}
+.read .side[data-side="for"] {
+  border-left-color: rgba(91, 140, 255, 0.55);
+}
+.read .side[data-side="against"] {
+  border-left-color: rgba(255, 159, 69, 0.55);
+}
+.read .read-watch {
+  font-size: 12.5px;
+  color: var(--gb-muted);
+}
+.read .read-note {
+  padding-top: 8px;
+  border-top: 1px solid var(--gb-border-soft);
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--gb-muted-2);
+}
+
+/* The hotkey hint beside the orb: shown on hover, and by itself the first few page loads. Small and
+   quiet — it sits next to the orb, never over the page's own content, and never over a card. */
+.tip {
+  position: absolute;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: rgba(11, 11, 16, 0.88);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid var(--gb-border);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.42);
+  color: var(--gb-text-3);
+  font-size: 11.5px;
+  line-height: 1;
+  pointer-events: none;
+  animation: gb-tip-in 180ms ease-out both;
+}
+.tip[hidden] {
+  display: none;
+}
+.tip[data-side="left"] {
+  right: 72px;
+}
+.tip[data-side="right"] {
+  left: 72px;
+}
+.tip-dot {
+  color: var(--gb-muted-2);
+}
+@keyframes gb-tip-in {
+  from { opacity: 0; transform: translateX(6px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tip { animation: none; }
+}

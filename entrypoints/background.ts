@@ -106,6 +106,17 @@ export default defineBackground(() => {
           return api.post("/buy", { outputMint: msg.outputMint, usdcAmount: msg.usdcAmount, context: msg.context });
         case "why":
           return api.post("/why", { ticker: msg.ticker });
+        case "warm-why":
+          // Sent on key-down: the answer is built while the user speaks, and the backend keeps it
+          // for ten minutes. Nothing waits on it, and a failure here is never shown.
+          void api.post("/why", { ticker: msg.ticker, warm: true }).catch(() => null);
+          return { ok: true };
+        case "company":
+          return api.post("/company", { companyId: msg.companyId, ticker: msg.ticker });
+        case "advice":
+          return api.post("/advice", { companyId: msg.companyId, ticker: msg.ticker });
+        case "company-history":
+          return api.post("/company/history", { mint: msg.mint });
         case "counter-view":
           return api.post("/counter-view", { ticker: msg.ticker });
         case "tts": {

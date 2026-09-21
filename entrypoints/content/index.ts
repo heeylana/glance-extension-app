@@ -14,7 +14,7 @@ import { Sketch } from "./sketch";
 import { MAP_MAX_WIDTH, mapPage, questionTerms, shrinkScreenshot, type PageMap } from "../../lib/page-map";
 import { clickLikeAPerson, clickTarget, inView, labelOf, newTabHref, refusal, scrollScreen, scrollToElement } from "./act";
 import type { BgRequest, BgResponse, TabMessage } from "../../lib/messages";
-import type { ApiError, Dictionary, DictionaryCompany, ExplainAction, ExplainMemory, ExplainStep, GlanceEntity, GlanceInput, GlanceResult, PriceRow, SketchMark } from "../../lib/api-types";
+import type { ApiError, Dictionary, DictionaryCompany, ExplainAction, ExplainMemory, ExplainStep, GlanceEntity, GlanceInput, GlanceResult, PriceRow, SketchMark, TokenMarket } from "../../lib/api-types";
 import { usd } from "../../lib/format";
 
 const OFFLINE = "Glance is offline right now. Your money is safe in your account.";
@@ -110,7 +110,12 @@ export default defineContentScript({
         void (async () => {
           const res = await send({ type: "tts", text }).catch(() => null);
           if (seq !== speakSeq) return; // a newer line superseded this one while it loaded
-          if (!res || !res.ok) return speakLocal(text, done);
+          if (!res || !res.ok) {
+            // Falling back is silent to the user, so say why here: a rejected line (too long for
+            // TTS_MAX_CHARS) sounds exactly like a missing key unless someone looks.
+            console.debug("[glance] the backend voice declined this line; using the browser's", { chars: text.length, code: res && "code" in res ? res.code : "offline" });
+            return speakLocal(text, done);
+          }
           const audio = new Audio(`data:${res.mime};base64,${res.audio}`);
           clip = audio;
           audio.addEventListener("playing", () => bubble?.setSpeaking(true));
@@ -175,6 +180,8 @@ export default defineContentScript({
           onCounterView: (e) => send({ type: "counter-view", ticker: e.ticker }),
           onWatch: (e) => send({ type: "watch", companyId: e.companyId }),
           onOpenPanel: () => void send({ type: "open-side-panel" }),
+          // Every company card, however it was opened, gets the day's chart under its headline.
+          onPick: (e) => void drawChart(e),
           speak,
           onListenStart: () => startListening("orb"),
           onListenStop: () => void stopListening(),
@@ -516,6 +523,91 @@ export default defineContentScript({
       bubble.reply(`You own ${list.length > 1 ? `${list.slice(0, -1).join(", ")} and ${list.at(-1)}` : list[0]}${more}. That's ${usd(stocks)} in stocks.`);
     }
 
+    /** How long a stock answer waits for the portfolio before speaking without "and you own some". */
+    const OWNED_BUDGET_MS = 400;
+
+    /**
+     * The day chart under any company card: a glance, a pick from the choice chips, the underline's
+     * "Glance this", or a spoken question. Asked for after the card is already up, so nothing waits
+     * on Birdeye, and only drawn while that company is still the one on screen. An empty answer (no
+     * Birdeye key, or a token it doesn't know) leaves the card exactly as it was.
+     */
+    let chartRun = 0;
+    async function drawChart(e: GlanceEntity, market: TokenMarket | null = null) {
+      if (!bubble || !e.tokenized) return;
+      if (market) bubble.showChart([], market);
+      const mint = e.listings?.[0]?.mint ?? e.mint;
+      if (!mint) return;
+      const run = ++chartRun;
+      const h = await send({ type: "company-history", mint }).catch(() => null);
+      if (!h?.ok || run !== chartRun || bubble?.entity?.companyId !== e.companyId) return;
+      // A host that answers without the fields (an older background, the preview shim) must not throw.
+      const points = h.points ?? [];
+      if (points.length || h.market) bubble.showChart(points, h.market ?? market);
+    }
+
+    /**
+     * A spoken question about a company (voice kind `stock`): "how's Nvidia doing?". The price and the
+     * day's move come from /company in about a third of a second; what the user owns is only added when
+     * the vault answers inside the budget, so the line never waits on the chain.
+     */
+    async function stock(companyId: string) {
+      if (!bubble) return;
+      const named = nameOf(companyId);
+      bubble.thinking(named ? `Checking ${named.name}…` : "Checking the price…", "working");
+      const owned = send({ type: "portfolio" }).catch(() => null);
+      const res = await send({ type: "company", companyId }).catch((): ApiError => ({ ok: false, code: "OFFLINE", message: OFFLINE }));
+      if (!bubble) return;
+      if (!res.ok) {
+        bubble.reply(res.code === "AUTH_INVALID" ? "Sign in to Glance to get started." : res.message);
+        return;
+      }
+      let line = res.summary;
+      if (res.entity.tokenized) {
+        const portfolio = await Promise.race([owned, new Promise<null>((r) => window.setTimeout(() => r(null), OWNED_BUDGET_MS))]);
+        const held = portfolio?.ok ? portfolio.holdings.find((h) => h.ticker === res.entity.ticker) : undefined;
+        if (held?.valueUsd) line = `${line} You own ${usd(held.valueUsd)} of it.`;
+      }
+      // showEntity only draws the card, unlike showResult, so the answer is said here.
+      bubble.showEntity(res.entity, line);
+      void speak(line);
+      // showEntity's onPick has already asked for the chart; this hands over the numbers the spoken
+      // line used, so the card shows them at once instead of waiting for that second call.
+      if (res.market) bubble.showChart([], res.market);
+    }
+
+    /**
+     * "What do you think of Nvidia?" (voice kind `advice`): the company's card, then Glance's read of
+     * it — what's happening, both sides, what to watch — said out loud and shown, ending with the
+     * disclaimer the backend writes. It takes a few seconds, so the orb works while it thinks.
+     */
+    let adviceRun = 0;
+    async function advice(companyId: string) {
+      if (!bubble) return;
+      const named = nameOf(companyId);
+      bubble.thinking(named ? `Reading up on ${named.name}…` : "Reading up on it…", "working");
+      const res = await send({ type: "advice", companyId }).catch((): ApiError => ({ ok: false, code: "OFFLINE", message: OFFLINE }));
+      if (!bubble) return;
+      if (!res.ok) {
+        bubble.reply(res.code === "AUTH_INVALID" ? "Sign in to Glance to get started." : res.message);
+        return;
+      }
+      // An untokenized company has no read: the card says so itself.
+      bubble.showEntity(res.entity, res.lines.length ? res.lines[0] : res.summary);
+      if (res.market) bubble.showChart([], res.market);
+      bubble.showRead(res.lines, res.disclaimer);
+      // One clip per line, said in order: a whole read is past the backend's limit for a single
+      // line, and speak() falls back to the browser's voice on any failure. Short clips also start
+      // sooner. A new take stops the run, because speak() cancels whatever was playing.
+      void (async () => {
+        const run = ++adviceRun;
+        for (const line of res.spokenLines.length ? res.spokenLines : [res.spoken]) {
+          if (run !== adviceRun) return;
+          await speak(line);
+        }
+      })();
+    }
+
     async function sellByVoice(companyId: string | null, amountUsd: number | null, all: boolean) {
       if (!bubble) return;
       const named = nameOf(companyId);
@@ -557,7 +649,11 @@ export default defineContentScript({
       true,
     );
     browser.runtime.onMessage.addListener((msg: TabMessage) => {
-      if (msg?.type === "trigger-glance") void glance();
+      if (msg?.type === "trigger-glance") {
+        // ⌥G came from the command API: they know the hotkeys, so stop offering them.
+        void Bubble.learnedHotkeys();
+        void glance();
+      }
     });
 
     // ---- Voice in (spec §7.4): hold ⌥V, or hold the orb, say it, let go ----
@@ -570,6 +666,10 @@ export default defineContentScript({
       if (take) return true;
       explainRun++;
       stopSpeaking();
+      // The most common thing said over a company card is "why did it move?", and that answer takes
+      // seconds to build. Start it now, while they speak, so it is waiting when they finish.
+      const onCard = bubble.entity;
+      if (onCard?.tokenized && onCard.ticker) void send({ type: "warm-why", ticker: onCard.ticker }).catch(() => null);
       bubble.listening();
       const started = send({ type: "listen-start" }).catch((): ApiError => ({ ok: false, code: "OFFLINE", message: OFFLINE }));
       const t = { from, at: Date.now(), started, limit: window.setTimeout(() => void stopListening(), MAX_TALK_MS) };
@@ -623,6 +723,8 @@ export default defineContentScript({
         explain: () => explain(res.transcript),
         scroll: scrollPage,
         account,
+        stock,
+        advice,
         sell: sellByVoice,
         remember: async () => void (await remember()),
       });
@@ -634,7 +736,10 @@ export default defineContentScript({
       (ev) => {
         if (ev.code !== TALK_CODE || !ev.altKey || ev.ctrlKey || ev.metaKey || !talk) return;
         ev.preventDefault(); // ⌥V types "√" on a Mac
-        if (!ev.repeat) startListening("key");
+        if (!ev.repeat) {
+          void Bubble.learnedHotkeys();
+          startListening("key");
+        }
       },
       true,
     );

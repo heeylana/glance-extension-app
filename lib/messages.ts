@@ -3,13 +3,20 @@
  * side panel. Content scripts never talk to the backend or Privy directly:
  * the background attaches the auth token and forwards (spec §5, §7.1).
  */
-import type { GlanceInput, GlanceVisionInput, GlanceResult, BuyResult, WhyResult, CounterViewResult, PriceRow, ApiError, Dictionary, VoiceContext, VoiceResult, ExplainInput, ExplainResult, SessionView, Portfolio, RememberInput, RememberResult } from "./api-types";
+import type { GlanceInput, GlanceVisionInput, GlanceResult, BuyResult, WhyResult, CounterViewResult, PriceRow, ApiError, Dictionary, VoiceContext, VoiceResult, ExplainInput, ExplainResult, SessionView, Portfolio, RememberInput, RememberResult, CompanyResult, CompanyHistory, AdviceResult } from "./api-types";
 
 export type BgRequest =
   | { type: "glance"; input: GlanceInput }
   | { type: "glance-vision"; input: GlanceVisionInput }
   | { type: "buy"; outputMint: string; usdcAmount: number; context: GlanceInput["context"] }
   | { type: "why"; ticker: string }
+  /** Start the "why did it move?" answer while the user is still talking, so it is ready when they ask. */
+  | { type: "warm-why"; ticker: string }
+  | { type: "company"; companyId?: string; ticker?: string }
+  /** "What do you think of Nvidia?": the read, with its disclaimer. */
+  | { type: "advice"; companyId?: string; ticker?: string }
+  /** The day's prices for the card's chart, fetched after the card is up so it never holds the answer back. */
+  | { type: "company-history"; mint: string }
   | { type: "counter-view"; ticker: string }
   | { type: "tts"; text: string }
   | { type: "prices"; tickers: string[] }
@@ -42,6 +49,12 @@ export type BgResponse<T extends BgRequest["type"]> = T extends "glance" | "glan
         ? Portfolio | ApiError
     : T extends "why"
       ? WhyResult | ApiError
+      : T extends "company"
+        ? CompanyResult | ApiError
+        : T extends "advice"
+          ? AdviceResult | ApiError
+        : T extends "company-history"
+          ? CompanyHistory | ApiError
       : T extends "counter-view"
         ? CounterViewResult | ApiError
         : T extends "tts"
