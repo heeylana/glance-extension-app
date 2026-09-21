@@ -1,6 +1,6 @@
 {
   "name": "glance-extension-app",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Glance browser extension (MV3)",
   "main": "index.js",
   "scripts": {
