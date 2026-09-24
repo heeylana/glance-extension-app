@@ -38,8 +38,9 @@ export default defineContentScript({
     if (window.top !== window) return; // top frame only
     primeAdapters();
 
-    // Voice out (spec §7.1): the backend's Fish Audio voice ("Soft male"), fetched through the background
-    // worker; the browser's own voice when that is unavailable or playback is blocked. The Settings
+    // Voice out (spec §7.1): the backend's Fish Audio voice ("Soft male"), fetched and played by the
+    // extension (the offscreen document), so the page's CSP cannot block it; the browser's own voice
+    // when that is unavailable. The Settings
     // toggle lives in extension storage, so read it from there and follow changes.
     let voice = true;
     void browser.storage.local.get("glance:voice").then((r) => {
@@ -65,6 +66,8 @@ export default defineContentScript({
       if (area === "local" && changes["glance:talk"]) talk = (changes["glance:talk"].newValue ?? "on") !== "off";
     });
     let clip: HTMLAudioElement | null = null;
+    /** A line is playing in the offscreen document, so stopping must reach it there. */
+    let offscreenClip = false;
     let speakSeq = 0;
     /** Resolves the line playing now, when it has been heard or cut off. */
     let lineDone: (() => void) | null = null;
@@ -92,6 +95,10 @@ export default defineContentScript({
       speakSeq++;
       clip?.pause();
       clip = null;
+      if (offscreenClip) {
+        offscreenClip = false;
+        void send({ type: "stop-audio" }).catch(() => undefined);
+      }
       try {
         speechSynthesis?.cancel();
       } catch {
@@ -116,6 +123,14 @@ export default defineContentScript({
             console.debug("[glance] the backend voice declined this line; using the browser's", { chars: text.length, code: res && "code" in res ? res.code : "offline" });
             return speakLocal(text, done);
           }
+          offscreenClip = true;
+          bubble?.setSpeaking(true);
+          const played = await send({ type: "play-audio", audio: res.audio, mime: res.mime }).catch(() => null);
+          if (seq !== speakSeq) return;
+          offscreenClip = false;
+          if (played?.ok) return done();
+          console.debug("[glance] offscreen playback failed; trying the page", played && !played.ok ? played.code : "no answer");
+          // Firefox has no offscreen documents: play in the page, as before.
           const audio = new Audio(`data:${res.mime};base64,${res.audio}`);
           clip = audio;
           audio.addEventListener("playing", () => bubble?.setSpeaking(true));

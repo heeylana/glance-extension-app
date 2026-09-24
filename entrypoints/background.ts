@@ -57,13 +57,13 @@ async function ensureRecorder(): Promise<boolean> {
   const open = await browser.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"], documentUrls: [browser.runtime.getURL(RECORDER_URL)] });
   if (open.length > 0) return true;
   creatingRecorder ??= browser.offscreen
-    .createDocument({ url: RECORDER_URL, reasons: ["USER_MEDIA"], justification: "Records a spoken command while the user holds the Glance talk key." })
+    .createDocument({ url: RECORDER_URL, reasons: ["USER_MEDIA", "AUDIO_PLAYBACK"], justification: "Records a spoken command while the user holds the Glance talk key, and plays Glance's spoken replies." })
     .finally(() => (creatingRecorder = null));
   await creatingRecorder;
   return true;
 }
 
-function recorder<T>(type: RecorderRequest["type"]): Promise<T> {
+function recorder<T>(type: Exclude<RecorderRequest["type"], "play">): Promise<T> {
   return browser.runtime.sendMessage({ target: "recorder", type } satisfies RecorderRequest) as Promise<T>;
 }
 
@@ -137,6 +137,12 @@ export default defineBackground(() => {
         case "listen-start":
           if (!(await ensureRecorder())) return { ok: false, code: "VOICE_UNSUPPORTED", message: "Talking to Glance needs Chrome, Brave, Edge or Arc." };
           return recorder<RecorderStart>("start");
+        case "play-audio":
+          if (!(await ensureRecorder())) return { ok: false, code: "PLAYBACK_UNSUPPORTED", message: "No offscreen audio here." };
+          return browser.runtime.sendMessage({ target: "recorder", type: "play", audio: msg.audio, mime: msg.mime } satisfies RecorderRequest);
+        case "stop-audio":
+          if (browser.offscreen) await recorder("hush").catch(() => undefined);
+          return { ok: true };
         case "listen-cancel":
           if (browser.offscreen) await recorder("cancel").catch(() => undefined);
           return { ok: true };

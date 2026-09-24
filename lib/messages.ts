@@ -19,6 +19,9 @@ export type BgRequest =
   | { type: "company-history"; mint: string }
   | { type: "counter-view"; ticker: string }
   | { type: "tts"; text: string }
+  /** Play a fetched clip in the offscreen document, where the page's CSP and autoplay rules cannot block it. Answers when it has been heard. */
+  | { type: "play-audio"; audio: string; mime: string }
+  | { type: "stop-audio" }
   | { type: "prices"; tickers: string[] }
   | { type: "dictionary" }
   | { type: "capture-visible-tab" }
@@ -59,6 +62,8 @@ export type BgResponse<T extends BgRequest["type"]> = T extends "glance" | "glan
         ? CounterViewResult | ApiError
         : T extends "tts"
           ? { ok: true; audio: string; mime: string } | ApiError
+        : T extends "play-audio"
+          ? { ok: true; stopped?: boolean } | ApiError
       : T extends "prices"
         ? { ok: true; prices: PriceRow[] } | ApiError
         : T extends "dictionary"
@@ -83,7 +88,10 @@ export type BgResponse<T extends BgRequest["type"]> = T extends "glance" | "glan
  * Background → the offscreen push-to-talk recorder (entrypoints/recorder). Tagged with `target`
  * because every extension page hears every runtime message; the recorder answers only these.
  */
-export type RecorderRequest = { target: "recorder"; type: "start" | "stop" | "cancel" };
+export type RecorderRequest =
+  | { target: "recorder"; type: "start" | "stop" | "cancel" | "hush" }
+  /** Glance's spoken line. Answers once it has played to the end, been hushed, or failed. */
+  | { target: "recorder"; type: "play"; audio: string; mime: string };
 export type RecorderStart = { ok: true } | ApiError;
 /** A finished take: 16 kHz mono WAV as a data URL, its length, and its loudest sample. */
 export type RecorderTake = { ok: true; wav: string; seconds: number; peak: number } | ApiError;

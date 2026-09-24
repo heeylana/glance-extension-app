@@ -3,6 +3,9 @@
  * extension and never to the site being read. The permission is granted once on mic.html (an
  * offscreen document cannot show a prompt) and this page inherits it. It records only between the
  * background's start and stop, releases the microphone straight after, and hands back 16 kHz mono WAV.
+ *
+ * It also plays Glance's voice. Played inside the page, a clip was blocked on any site whose CSP has
+ * no data: in media-src (or that refused autoplay), and every line fell back to the browser's voice.
  */
 import { browser } from "wxt/browser";
 import { concat, downsample, encodeWav, peak, SPEECH_RATE, toBase64 } from "../../lib/audio";
@@ -84,9 +87,47 @@ function release() {
   take = null;
 }
 
+let playing: { audio: HTMLAudioElement; finish: (r: { ok: true; stopped?: boolean } | { ok: false; code: string; message: string }) => void } | null = null;
+
+/** Stop the line playing now; its play() answers as stopped. */
+function hush() {
+  const p = playing;
+  playing = null;
+  if (!p) return;
+  p.audio.pause();
+  p.finish({ ok: true, stopped: true });
+}
+
+function play(src: string): Promise<{ ok: true; stopped?: boolean } | { ok: false; code: string; message: string }> {
+  hush();
+  return new Promise((resolve) => {
+    const audio = new Audio(src);
+    let settled = false;
+    const finish: typeof resolve = (r) => {
+      if (settled) return;
+      settled = true;
+      if (playing?.audio === audio) playing = null;
+      resolve(r);
+    };
+    playing = { audio, finish };
+    audio.addEventListener("ended", () => finish({ ok: true }));
+    audio.addEventListener("error", () => finish({ ok: false, code: "PLAYBACK_FAILED", message: "The clip didn't play." }));
+    audio.play().catch((e) => finish({ ok: false, code: "PLAYBACK_FAILED", message: String(e) }));
+  });
+}
+
 browser.runtime.onMessage.addListener((raw: unknown, _sender, sendResponse) => {
   const msg = raw as RecorderRequest | undefined;
   if (msg?.target !== "recorder") return false;
+  if (msg.type === "play") {
+    void play(`data:${msg.mime};base64,${msg.audio}`).then(sendResponse);
+    return true;
+  }
+  if (msg.type === "hush") {
+    hush();
+    sendResponse({ ok: true });
+    return false;
+  }
   const run: Promise<RecorderStart | RecorderTake> = msg.type === "start" ? start() : msg.type === "stop" ? stop() : Promise.resolve((release(), { ok: true as const }));
   run.then(sendResponse, (e) => sendResponse({ ok: false, code: "RECORDER_ERROR", message: "I couldn't hear that. Try again?", detail: String(e) }));
   return true;
