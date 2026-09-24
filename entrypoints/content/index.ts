@@ -38,7 +38,7 @@ export default defineContentScript({
     if (window.top !== window) return; // top frame only
     primeAdapters();
 
-    // Voice out (spec §7.1): the backend's Fish Audio voice ("Ethan"), fetched through the background
+    // Voice out (spec §7.1): the backend's Fish Audio voice ("Soft male"), fetched through the background
     // worker; the browser's own voice when that is unavailable or playback is blocked. The Settings
     // toggle lives in extension storage, so read it from there and follow changes.
     let voice = true;
