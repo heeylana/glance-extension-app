@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useApi, useQuery, useToast } from "../hooks";
 import { isApiError } from "../../../lib/api";
-import type { Holding, Portfolio as PortfolioT, SessionView } from "../../../lib/api-types";
+import type { ApiError, Holding, Portfolio as PortfolioT, SessionView } from "../../../lib/api-types";
+import { errorAction } from "../../../lib/error-action";
 import { pct, shares, usd } from "../../../lib/format";
 import { useGlanceAuth } from "../../../lib/auth";
 import { cacheAge, cachedPortfolio, rememberedVault, savePortfolio, type CachedPortfolio } from "../../../lib/portfolio-cache";
@@ -144,8 +145,10 @@ function SellDialog({ holding, onClose, onSold }: { holding: Holding; onClose: (
   const options = [10, 25].filter((v) => v < all);
   const [amount, setAmount] = useState<number>(all);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<ApiError | null>(null);
+  const auth = useGlanceAuth();
   const sellingAll = amount >= all;
+  const action = err ? errorAction(err, { where: "panel", side: "sell", name: holding.name }) : null;
   return (
     <Dialog
       title={sellingAll ? `Sell all your ${holding.name}?` : `Sell $${amount} of ${holding.name}?`}
@@ -166,8 +169,21 @@ function SellDialog({ holding, onClose, onSold }: { holding: Holding; onClose: (
           ) : null}
           {err ? (
             <span role="alert" className="mt-2 block text-danger-text">
-              {err}
+              {err.message}
             </span>
+          ) : null}
+          {action && action.kind !== "try-again" ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="mt-2.5"
+              onClick={() => {
+                if (action.kind === "open-console") window.open(action.url, "_blank", "noopener");
+                else if (action.kind === "sign-in") void auth.signIn();
+              }}
+            >
+              {action.label}
+            </Button>
           ) : null}
         </>
       }
@@ -183,11 +199,11 @@ function SellDialog({ holding, onClose, onSold }: { holding: Holding; onClose: (
           setErr(null);
           const r = await api.post<{ ok: true; message: string }>("/sell", sellingAll ? { inputMint: holding.mint, stockAmountRaw: holding.sharesRaw } : { inputMint: holding.mint, usd: amount });
           setBusy(false);
-          if (isApiError(r)) setErr(r.message);
+          if (isApiError(r)) setErr(r);
           else onSold(r.message);
         }}
       >
-        Sell it
+        {action?.kind === "try-again" ? action.label : "Sell it"}
       </Button>
       <Button size="lg" variant="secondary" className="text-text-2" onClick={onClose}>
         Keep it

@@ -16,6 +16,7 @@ import { clickLikeAPerson, clickTarget, inView, labelOf, newTabHref, refusal, sc
 import type { BgRequest, BgResponse, TabMessage } from "../../lib/messages";
 import type { ApiError, Dictionary, DictionaryCompany, ExplainAction, ExplainMemory, ExplainStep, GlanceEntity, GlanceInput, GlanceResult, PriceRow, SketchMark, TokenMarket } from "../../lib/api-types";
 import { usd } from "../../lib/format";
+import { Answer, type SpeechClip } from "../../lib/speech";
 
 const OFFLINE = "Glance is offline right now. Your money is safe in your account.";
 /** Push-to-talk (spec §7.4): hold ⌥V. ⌥G stays a tap; Chrome's command API never reports a key release, so holding is read here. */
@@ -77,19 +78,6 @@ export default defineContentScript({
       bubble?.setSpeaking(false);
       done?.();
     };
-    const speakLocal = (text: string, done: () => void) => {
-      if (!("speechSynthesis" in window)) return done();
-      try {
-        speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
-        u.rate = 1.05;
-        u.onstart = () => bubble?.setSpeaking(true);
-        u.onend = u.onerror = done;
-        speechSynthesis.speak(u);
-      } catch {
-        done();
-      }
-    };
     /** Silence Glance, including a line still loading: when the user starts talking, and before a new line. */
     const stopSpeaking = () => {
       speakSeq++;
@@ -99,53 +87,58 @@ export default defineContentScript({
         offscreenClip = false;
         void send({ type: "stop-audio" }).catch(() => undefined);
       }
-      try {
-        speechSynthesis?.cancel();
-      } catch {
-        /* ignore */
-      }
       finishLine();
     };
-    /** Say a line. Resolves once it has been heard, cut off by a newer line, or at once when the voice is off. */
-    const speak = (text: string): Promise<void> => {
-      stopSpeaking();
-      if (!voice) return Promise.resolve();
-      const seq = speakSeq;
-      return new Promise<void>((resolve) => {
-        lineDone = resolve;
-        const done = () => seq === speakSeq && finishLine();
-        void (async () => {
-          const res = await send({ type: "tts", text }).catch(() => null);
-          if (seq !== speakSeq) return; // a newer line superseded this one while it loaded
-          if (!res || !res.ok) {
-            // Falling back is silent to the user, so say why here: a rejected line (too long for
-            // TTS_MAX_CHARS) sounds exactly like a missing key unless someone looks.
-            console.debug("[glance] the backend voice declined this line; using the browser's", { chars: text.length, code: res && "code" in res ? res.code : "offline" });
-            return speakLocal(text, done);
-          }
-          offscreenClip = true;
-          bubble?.setSpeaking(true);
-          const played = await send({ type: "play-audio", audio: res.audio, mime: res.mime }).catch(() => null);
-          if (seq !== speakSeq) return;
-          offscreenClip = false;
-          if (played?.ok) return done();
-          console.debug("[glance] offscreen playback failed; trying the page", played && !played.ok ? played.code : "no answer");
-          // Firefox has no offscreen documents: play in the page, as before.
-          const audio = new Audio(`data:${res.mime};base64,${res.audio}`);
-          clip = audio;
-          audio.addEventListener("playing", () => bubble?.setSpeaking(true));
-          audio.addEventListener("ended", done);
-          audio.addEventListener("error", done);
-          try {
-            await audio.play();
-          } catch (e) {
-            console.debug("[glance] audio playback blocked; using the local voice", e);
-            speakLocal(text, done);
-          }
-        })();
+    /** Backend synthesis of one line (cached by text in the background worker); null when it declined or failed. */
+    const synth = async (text: string): Promise<SpeechClip | null> => {
+      const res = await send({ type: "tts", text }).catch(() => null);
+      if (res?.ok) return { audio: res.audio, mime: res.mime };
+      // Say why here: a rejected line (too long for TTS_MAX_CHARS) sounds exactly like a missing key unless someone looks.
+      console.debug("[glance] the backend voice declined this line", { chars: text.length, code: res && "code" in res ? res.code : "offline" });
+      return null;
+    };
+    const newAnswer = () => new Answer(synth);
+    /** Play a clip in the offscreen document, or in the page where there is none (Firefox). False if neither could. */
+    const playClip = async (audioClip: SpeechClip, seq: number): Promise<boolean> => {
+      offscreenClip = true;
+      bubble?.setSpeaking(true);
+      const played = await send({ type: "play-audio", audio: audioClip.audio, mime: audioClip.mime }).catch(() => null);
+      if (seq !== speakSeq) return true;
+      offscreenClip = false;
+      if (played?.ok) return true;
+      console.debug("[glance] offscreen playback failed; trying the page", played && !played.ok ? played.code : "no answer");
+      const audio = new Audio(`data:${audioClip.mime};base64,${audioClip.audio}`);
+      clip = audio;
+      return new Promise<boolean>((resolve) => {
+        audio.addEventListener("playing", () => bubble?.setSpeaking(true));
+        audio.addEventListener("ended", () => resolve(true));
+        audio.addEventListener("error", () => resolve(false));
+        audio.play().catch((e) => {
+          console.debug("[glance] audio playback blocked", e);
+          resolve(false);
+        });
       });
     };
-
+    /**
+     * Say one line of an answer in the backend's voice (lib/speech.ts), or stay silent if it cannot be voiced: the line is
+     * on the card either way. Resolves true once heard; false when silent, cut off by a newer line, or the voice is off.
+     */
+    const sayLine = (answer: Answer, text: string): Promise<boolean> => {
+      stopSpeaking();
+      if (!voice) return Promise.resolve(false);
+      const seq = speakSeq;
+      return new Promise<boolean>((resolve) => {
+        let heard = false;
+        lineDone = () => resolve(heard);
+        const current = () => seq === speakSeq;
+        void answer.say(text, { current, play: (c) => playClip(c, seq) }).then((h) => {
+          heard = h;
+          if (current()) finishLine();
+        });
+      });
+    };
+    /** A one-line answer. Answers of several lines share one Answer, so the rest are fetched while the first plays. */
+    const speak = (text: string): Promise<void> => sayLine(newAnswer(), text).then(() => undefined);
     // ---- Passive mode: dictionary underlines, no network per page (spec §7.3) ----
     let matcher: Matcher | null = null;
     let companies: DictionaryCompany[] = [];
@@ -337,7 +330,11 @@ export default defineContentScript({
     const MAX_STEPS = 4;
     /** Between saying "I'll click this" and clicking: time to see the ring, and to press Escape. */
     const CLICK_GRACE_MS = 1200;
-    const say = (text: string) => (voice ? speak(text) : new Promise<void>((r) => window.setTimeout(r, readingMs(text))));
+    const read = (text: string) => new Promise<void>((r) => window.setTimeout(r, readingMs(text)));
+    // A line that stays silent is given its reading time, so the drawings still keep pace.
+    const say = async (text: string, answer: Answer) => {
+      if (!voice || !(await sayLine(answer, text))) await read(text);
+    };
 
     /** Wait out the grace period; false if the user cancelled (Escape, a new take, or closing the card). */
     function grace(run: number, ms: number): Promise<boolean> {
@@ -361,13 +358,13 @@ export default defineContentScript({
      * Take the step the model asked for. Returns how it went, for the next look, or null when the
      * answer should stop here (cancelled, or the page is being left).
      */
-    async function takeStep(a: ExplainAction, map: PageMap, run: number): Promise<ExplainStep["action"] | null> {
+    async function takeStep(a: ExplainAction, map: PageMap, run: number, answer: Answer): Promise<ExplainStep["action"] | null> {
       const node = a.element ? map.nodes.get(a.element) : undefined;
       const base = { kind: a.kind as "scroll" | "click", target: node ? labelOf(node) || null : null, direction: a.direction };
       if (!act) {
         const line = "Scrolling and clicking are turned off in Settings, so I'll stop here.";
         bubble!.explainStatus(line);
-        await say(line);
+        await say(line, answer);
         return null;
       }
       if (a.kind === "scroll") {
@@ -385,7 +382,7 @@ export default defineContentScript({
       if (no) {
         const line = `I won't click “${label}”: ${no} You can click it yourself.`;
         bubble!.explainStatus(line);
-        await say(line);
+        await say(line, answer);
         return null;
       }
       if (!inView(target)) await scrollToElement(target);
@@ -427,6 +424,8 @@ export default defineContentScript({
       sketch.clear(true);
       stopSpeaking();
       const run = ++explainRun;
+      // Every line of this explanation, over every step, is one answer: each line is fetched ahead of its turn.
+      const answer = newAnswer();
       const history: ExplainStep[] = [];
       let shown = false;
       // Words the question names ("point me to Anthropic"), so the map includes their mentions far down the page.
@@ -453,12 +452,12 @@ export default defineContentScript({
             const line = res.code === "OFFLINE" ? OFFLINE : res.message;
             if (shown) bubble.explainStatus(line);
             else bubble.showError(line, { retry: false });
-            void speak(res.message);
+            void (shown ? sayLine(answer, res.message) : speak(res.message));
             return;
           }
-          // Voice the later lines ahead of time so the explanation runs without gaps.
-          if (voice) for (const seg of res.segments.slice(1)) void send({ type: "tts", text: seg.say }).catch(() => null);
           const lines = res.segments.map((seg) => seg.say);
+          // The first line is fetched now, while the marks are revealed; the rest while it plays.
+          if (voice) answer.prepare(lines);
           let first = 0;
           if (shown) {
             bubble.explainWorking(null);
@@ -474,10 +473,10 @@ export default defineContentScript({
             await reveal(seg.marks, map);
             if (run !== explainRun) return;
             seg.marks.forEach((m, j) => sketch!.draw(m, map, j * 450, res.chart));
-            await say(seg.say);
+            await say(seg.say, answer);
           }
           if (run !== explainRun || res.action.kind === "none") break;
-          const done = await takeStep(res.action, map, run);
+          const done = await takeStep(res.action, map, run, answer);
           if (!done || run !== explainRun) {
             if (run === explainRun) bubble.explainWorking(null);
             return;
@@ -577,15 +576,27 @@ export default defineContentScript({
         bubble.reply(res.code === "AUTH_INVALID" ? "Sign in to Glance to get started." : res.message);
         return;
       }
-      let line = res.summary;
+      // The summary is voiced now, while the vault is asked what the user owns; the holding is its own second line,
+      // so neither waits on the other.
+      const answer = newAnswer();
+      if (voice) answer.prepare([res.summary]);
+      let owns: string | null = null;
       if (res.entity.tokenized) {
         const portfolio = await Promise.race([owned, new Promise<null>((r) => window.setTimeout(() => r(null), OWNED_BUDGET_MS))]);
         const held = portfolio?.ok ? portfolio.holdings.find((h) => h.ticker === res.entity.ticker) : undefined;
-        if (held?.valueUsd) line = `${line} You own ${usd(held.valueUsd)} of it.`;
+        if (held?.valueUsd) owns = `You own ${usd(held.valueUsd)} of it.`;
       }
+      if (!bubble) return;
       // showEntity only draws the card, unlike showResult, so the answer is said here.
-      bubble.showEntity(res.entity, line);
-      void speak(line);
+      bubble.showEntity(res.entity, owns ? `${res.summary} ${owns}` : res.summary);
+      if (owns && voice) answer.prepare([owns]);
+      void (async () => {
+        const first = sayLine(answer, res.summary);
+        const seq = speakSeq;
+        await first;
+        // Only if nothing newer has spoken since: a new line or take bumps speakSeq.
+        if (owns && seq === speakSeq) await sayLine(answer, owns);
+      })();
       // showEntity's onPick has already asked for the chart; this hands over the numbers the spoken
       // line used, so the card shows them at once instead of waiting for that second call.
       if (res.market) bubble.showChart([], res.market);
@@ -607,18 +618,21 @@ export default defineContentScript({
         bubble.reply(res.code === "AUTH_INVALID" ? "Sign in to Glance to get started." : res.message);
         return;
       }
+      // One clip per line, said in order, as one answer: a whole read is past the backend's limit for a
+      // single line, and short clips start sooner. The first is fetched before the card is drawn.
+      const spoken = res.spokenLines.length ? res.spokenLines : [res.spoken];
+      const answer = newAnswer();
+      if (voice) answer.prepare(spoken);
       // An untokenized company has no read: the card says so itself.
       bubble.showEntity(res.entity, res.lines.length ? res.lines[0] : res.summary);
       if (res.market) bubble.showChart([], res.market);
       bubble.showRead(res.lines, res.disclaimer);
-      // One clip per line, said in order: a whole read is past the backend's limit for a single
-      // line, and speak() falls back to the browser's voice on any failure. Short clips also start
-      // sooner. A new take stops the run, because speak() cancels whatever was playing.
+      // A new take stops the run, because each line cancels whatever was playing.
       void (async () => {
         const run = ++adviceRun;
-        for (const line of res.spokenLines.length ? res.spokenLines : [res.spoken]) {
+        for (const line of spoken) {
           if (run !== adviceRun) return;
-          await speak(line);
+          await sayLine(answer, line);
         }
       })();
     }

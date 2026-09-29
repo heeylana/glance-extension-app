@@ -9,6 +9,7 @@
  */
 import type { EntityListing, GlanceResult, GlanceEntity, BuyResult, ApiError, WhyResult, CounterViewResult, Holding, TokenMarket, VoiceCompany, VoiceContext, VoiceView } from "../../lib/api-types";
 import { AMOUNT_CHIPS } from "../../lib/config";
+import { errorAction, type ErrorAction } from "../../lib/error-action";
 import { usd, usdShort, countShort } from "../../lib/format";
 import { spark, type SparkPoint } from "../../lib/spark";
 import { browser } from "wxt/browser";
@@ -491,33 +492,21 @@ export class Bubble {
         buyBtn.disabled = false;
         status.className = "status err";
         status.textContent = res.message;
-        if (res.code === "OUTPUT_MINT_NOT_ISSUER" && res.realMint) {
-          // Spec §7.8 lookalike token: the line offers the real one; this is the button that takes it.
-          const real = res.realMint;
-          const chip = document.createElement("button");
-          chip.className = "chip";
-          chip.textContent = `Buy the real ${e.name}`;
-          chip.addEventListener("click", () => this.showEntity({ ...e, mint: real, tokenized: true }));
-          status.after(chip);
-        }
-        if (res.code === "OVER_DAILY_CAP" && res.remainingUsd && res.remainingUsd >= 1) {
-          const amt = Math.floor(res.remainingUsd);
-          const chip = document.createElement("button");
-          chip.className = "chip";
-          chip.textContent = `Buy $${amt} now`;
-          chip.addEventListener("click", () => {
+        // Spec §7.8 lookalike token: the line offers the real one; over the cap, what still fits; otherwise one way on.
+        this.offerAction(status, errorAction(res, { where: "page", side: "buy", name: e.name }), {
+          retry: () => buyBtn.click(),
+          buyReal: (mint) => this.showEntity({ ...e, mint, tokenized: true }),
+          watch: async () => {
+            this.work("working");
+            const w = await this.h.onWatch(e);
+            this.work(null);
+            this.finish(w.message, w.ok);
+          },
+          buyAmount: (amt) => {
             setAmount(amt);
             buyBtn.click();
-          });
-          status.after(chip);
-        }
-        if (res.code === "SESSION_EXPIRED" || res.code === "NO_SESSION" || res.code === "AUTH_INVALID" || res.code === "INSUFFICIENT_FUNDS") {
-          const open = document.createElement("button");
-          open.className = "chip";
-          open.textContent = res.code === "INSUFFICIENT_FUNDS" ? "Add money" : "Open Glance";
-          open.addEventListener("click", () => this.h.onOpenPanel());
-          status.after(open);
-        }
+          },
+        });
         this.h.speak(res.message);
       }
     });
@@ -654,9 +643,33 @@ export class Bubble {
         sellBtn.disabled = false;
         status.className = "status err";
         status.textContent = res.message;
+        this.offerAction(status, errorAction(res, { where: "page", side: "sell", name: h.name }), { retry: () => sellBtn.click() });
         this.h.speak(res.message);
       }
     });
+  }
+
+  /** The one button under a failed trade's message (lib/error-action.ts). Replaces any earlier one, so there is never two. */
+  private offerAction(
+    status: HTMLElement,
+    action: ErrorAction,
+    run: { retry: () => void; buyReal?: (mint: string) => void; buyAmount?: (usd: number) => void; watch?: () => void },
+  ) {
+    this.card.querySelector("[data-role=error-action]")?.remove();
+    const chip = document.createElement("button");
+    chip.className = "chip";
+    chip.dataset.role = "error-action";
+    chip.textContent = action.label;
+    chip.addEventListener("click", () => {
+      chip.remove();
+      if (action.kind === "open-console") window.open(action.url, "_blank", "noopener");
+      else if (action.kind === "open-panel" || action.kind === "sign-in") this.h.onOpenPanel();
+      else if (action.kind === "buy-real" && run.buyReal) run.buyReal(action.mint);
+      else if (action.kind === "buy-amount" && run.buyAmount) run.buyAmount(action.amountUsd);
+      else if (action.kind === "watch" && run.watch) run.watch();
+      else run.retry();
+    });
+    status.after(chip);
   }
 
   // ---- "Show me": an explanation spoken while Glance draws on the page ----

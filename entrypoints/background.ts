@@ -11,7 +11,7 @@ import { toBase64 } from "../lib/audio";
 import { openMicSetup } from "../lib/mic";
 import { SESSION_TOKEN_KEY } from "../lib/config";
 import type { BgRequest, RecorderRequest, RecorderStart, RecorderTake, TabMessage } from "../lib/messages";
-import type { Dictionary, VoiceResult } from "../lib/api-types";
+import type { ApiError, Dictionary, VoiceResult } from "../lib/api-types";
 
 const TOKENS_KEY = "glance:tokens";
 const DICT_KEY = "glance:dictionary";
@@ -19,6 +19,8 @@ const DICT_TTL_MS = 60 * 60 * 1000;
 /** Spoken lines repeat; keep the last few clips so a repeat never leaves the worker. */
 const TTS_CACHE_MAX = 40;
 const ttsCache = new Map<string, { audio: string; mime: string }>();
+/** Lines being synthesized now: a second ask for the same text (an answer fetching ahead, then saying it) shares one request. */
+const ttsPending = new Map<string, Promise<{ ok: true; audio: string; mime: string } | ApiError>>();
 
 async function getTokens(): Promise<{ accessToken: string | null }> {
   const r = (await browser.storage.session.get(TOKENS_KEY)) as Record<string, { accessToken: string | null } | undefined>;
@@ -123,12 +125,18 @@ export default defineBackground(() => {
           const key = msg.text.trim().toLowerCase();
           const hit = ttsCache.get(key);
           if (hit) return { ok: true, ...hit };
-          const r = await api.postBytes("/tts", { text: msg.text });
-          if (!r.ok) return r;
-          const clip = { audio: toBase64(r.bytes), mime: r.mime };
-          ttsCache.set(key, clip);
-          if (ttsCache.size > TTS_CACHE_MAX) ttsCache.delete(ttsCache.keys().next().value!);
-          return { ok: true, ...clip };
+          const inFlight = ttsPending.get(key);
+          if (inFlight) return inFlight;
+          const request = (async () => {
+            const r = await api.postBytes("/tts", { text: msg.text });
+            if (!r.ok) return r;
+            const clip = { audio: toBase64(r.bytes), mime: r.mime };
+            ttsCache.set(key, clip);
+            if (ttsCache.size > TTS_CACHE_MAX) ttsCache.delete(ttsCache.keys().next().value!);
+            return { ok: true as const, ...clip };
+          })().finally(() => ttsPending.delete(key));
+          ttsPending.set(key, request);
+          return request;
         }
         case "prices":
           return api.get(`/prices?tickers=${encodeURIComponent(msg.tickers.join(","))}`);
