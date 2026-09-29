@@ -1,8 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useApi, useQuery, useToast } from "../hooks";
 import { isApiError } from "../../../lib/api";
 import type { Holding, Portfolio as PortfolioT, SessionView } from "../../../lib/api-types";
 import { pct, shares, usd } from "../../../lib/format";
+import { useGlanceAuth } from "../../../lib/auth";
+import { cacheAge, cachedPortfolio, rememberedVault, savePortfolio, type CachedPortfolio } from "../../../lib/portfolio-cache";
 import { Button, Card, Chip, Dialog, Empty, ErrorBox, Skeleton, Stat, Toast, useFlash } from "../components/ui";
 
 /** Spec §7.7 Portfolio in the prototype's layout: Stocks / Cash card, glass rows, Sell dialog. */
@@ -11,8 +13,43 @@ export function Portfolio({ session, onGoSettings }: { session: SessionView | nu
   const [selling, setSelling] = useState<Holding | null>(null);
   const { toast, show } = useToast();
   const flash = useFlash(q.data?.totalUsd);
+  const { owner } = useGlanceAuth();
+  const [remembered, setRemembered] = useState<string | null>(null);
+  const [cached, setCached] = useState<CachedPortfolio | null>(null);
+  // The real vault wins as soon as /session answers; until then, the one this owner last used.
+  const vault = session?.vault ?? remembered;
 
-  if (q.loading && !q.data) {
+  useEffect(() => {
+    setRemembered(null);
+    if (!owner) return;
+    let alive = true;
+    void rememberedVault(owner).then((v) => {
+      if (alive) setRemembered(v);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [owner]);
+
+  useEffect(() => {
+    setCached(null);
+    if (!vault) return;
+    let alive = true;
+    void cachedPortfolio(vault).then((c) => {
+      if (alive) setCached(c);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [vault]);
+
+  useEffect(() => {
+    if (q.data) void savePortfolio(q.data.vault, q.data);
+  }, [q.data]);
+
+  const stale = cachedView(q, cached, vault);
+
+  if (q.loading && !q.data && !stale) {
     return (
       <div className="space-y-2.5" aria-busy>
         <Skeleton className="h-6 w-28" />
@@ -22,15 +59,15 @@ export function Portfolio({ session, onGoSettings }: { session: SessionView | nu
       </div>
     );
   }
-  if (q.error && !q.data) return <ErrorBox message={q.error.message} onRetry={() => void q.refetch()} />;
-  const p = q.data!;
+  if (q.error && !q.data && !stale) return <ErrorBox message={q.error.message} onRetry={() => void q.refetch()} />;
+  const p = q.data ?? stale!.data;
   const moves = p.holdings.filter((h) => h.dayChangePct !== null && h.valueUsd !== null);
   const dayUsd = moves.reduce((a, h) => a + (h.valueUsd! * (h.dayChangePct! / 100)) / (1 + h.dayChangePct! / 100), 0);
   const pnl = moves.length ? dayUsd : null;
   return (
     <div className="rise">
       <h2 className="mb-3.5 text-[20px] font-semibold tracking-[-0.02em]">Portfolio</h2>
-      <Card className="mb-2.5 flex gap-2.5">
+      <Card className={`${stale ? "mb-1.5" : "mb-2.5"} flex gap-2.5`}>
         <Stat
           label="Stocks"
           value={<span className={flash ? "text-success transition-colors" : "transition-colors duration-500"}>{usd(p.totalUsd)}</span>}
@@ -39,6 +76,7 @@ export function Portfolio({ session, onGoSettings }: { session: SessionView | nu
         />
         <Stat label="Cash" value={usd(p.cashUsd)} sub={session ? `${usd(session.remainingTodayUsd)} left today` : undefined} />
       </Card>
+      {stale ? <CachedAge at={stale.at} /> : null}
 
       {p.holdings.length === 0 ? (
         <Empty title="Nothing in here yet." body="Click any company name on the page and I'll offer to buy it." />
@@ -56,7 +94,7 @@ export function Portfolio({ session, onGoSettings }: { session: SessionView | nu
                 <p className="font-mono text-[15px] font-semibold tabular-nums">{usd(h.valueUsd)}</p>
                 {h.dayChangePct !== null ? <p className={`mt-0.5 font-mono text-[11px] tabular-nums ${h.dayChangePct >= 0 ? "text-success" : "text-danger-text"}`}>{pct(h.dayChangePct)} today</p> : null}
               </div>
-              <Button size="sm" variant="secondary" className="text-text-2" onClick={() => setSelling(h)} aria-label={`Sell ${h.name}`}>
+              <Button size="sm" variant="secondary" className="text-text-2" disabled={!!stale} onClick={() => setSelling(h)} aria-label={`Sell ${h.name}`}>
                 Sell
               </Button>
             </li>
@@ -87,6 +125,16 @@ export function Portfolio({ session, onGoSettings }: { session: SessionView | nu
       {toast ? <Toast text={toast.text} kind={toast.kind} /> : null}
     </div>
   );
+}
+
+/** The cached portfolio to show, or null: only until live data arrives, whether the fetch is in flight, slow or failed. */
+export function cachedView(q: { data: PortfolioT | null }, cached: CachedPortfolio | null, vault: string | null | undefined): CachedPortfolio | null {
+  return !q.data && cached && vault && cached.data.vault === vault ? cached : null;
+}
+
+/** "Last known 5 minutes ago", on its own line under the Stocks / Cash card. */
+export function CachedAge({ at, now }: { at: number; now?: number }) {
+  return <p className="mb-2.5 px-1 font-mono text-[11.5px] tabular-nums text-muted-foreground">{cacheAge(at, now)}</p>;
 }
 
 function SellDialog({ holding, onClose, onSold }: { holding: Holding; onClose: () => void; onSold: (msg: string) => void }) {

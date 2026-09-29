@@ -3,6 +3,7 @@ import { CreditCard, Newspaper, Clock, Settings as SettingsIcon } from "lucide-r
 import { GlanceAuthProvider, useGlanceAuth } from "../../lib/auth";
 import { useQuery, useStorageValue } from "./hooks";
 import type { SessionView } from "../../lib/api-types";
+import { rememberVault } from "../../lib/portfolio-cache";
 import { Mark, Skeleton } from "./components/ui";
 import { Onboarding, type OnboardingStep } from "./screens/Onboarding";
 import { Portfolio } from "./screens/Portfolio";
@@ -31,6 +32,10 @@ function Shell() {
   useEffect(() => {
     if (auth.ready && !auth.authenticated && onboarding.done) void setOnboarding({ done: false, step: "signin" });
   }, [auth.ready, auth.authenticated, onboarding.done, setOnboarding]);
+
+  useEffect(() => {
+    if (auth.owner && session.data?.vault) void rememberVault(auth.owner, session.data.vault);
+  }, [auth.owner, session.data?.vault]);
 
   const needsOnboarding = !auth.ready || !auth.authenticated || !onboarding.done || (session.data ? session.data.needsAccount : false);
   const step: OnboardingStep = !auth.authenticated ? "signin" : session.data?.needsAccount !== false ? "account" : "tryit";

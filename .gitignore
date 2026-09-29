@@ -6,3 +6,5 @@ dist
 *.log
 .keys
 scripts/out/
+.env.local
+.env.*.local
