@@ -54,6 +54,12 @@ export interface EntityListing {
   /** Token price against the mark, in percent: positive is a premium. */
   premiumPct: number | null;
   liquidityUsd: number | null;
+  /** Who marked it: "tessera" when the issuer's own API answered, "jupiter" for the generic feed. */
+  markSource?: "tessera" | "jupiter" | null;
+  /** Wallets holding the token, where the issuer publishes it. */
+  holders?: number | null;
+  /** The company's valuation behind the mark, in USD, where the issuer publishes it. */
+  markValuation?: number | null;
 }
 
 export interface GlanceResult {

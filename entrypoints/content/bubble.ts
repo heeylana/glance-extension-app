@@ -8,6 +8,7 @@
  * card's border carries a beam while Glance is working.
  */
 import type { EntityListing, GlanceResult, GlanceEntity, BuyResult, ApiError, WhyResult, CounterViewResult, Holding, TokenMarket, VoiceCompany, VoiceContext, VoiceView } from "../../lib/api-types";
+import { issuerNote } from "../../lib/issuer-note";
 import { AMOUNT_CHIPS } from "../../lib/config";
 import { errorAction, type ErrorAction } from "../../lib/error-action";
 import { usd, usdShort, countShort } from "../../lib/format";
@@ -439,6 +440,7 @@ export class Bubble {
       <div class="chart" data-role="chart" hidden></div>
       <div class="read" data-role="read" hidden></div>
       ${tokens}
+      <p class="issuer" data-role="issuer"${chosen && issuerNote(chosen) ? "" : " hidden"}>${chosen ? esc(issuerNote(chosen) ?? "") : ""}</p>
       <div class="chips" role="group" aria-label="Amount">${AMOUNT_CHIPS.map(
         (a) => `<button class="chip" data-amt="${a}" aria-pressed="${a === this.amount}">$${a}</button>`,
       ).join("")}<label class="chip custom"><span class="sr-only"></span><input type="number" inputmode="decimal" min="1" step="1" placeholder="$ custom" aria-label="Custom amount in dollars"></label></div>
@@ -459,6 +461,13 @@ export class Bubble {
         chosen = listings[Number(b.dataset.token)] ?? chosen;
         this.card.querySelectorAll<HTMLButtonElement>("[data-token]").forEach((x) => x.setAttribute("aria-checked", String(x === b)));
         buyBtn.textContent = buyLabel();
+        // The note belongs to the token, not the company: picking a different issuer's token changes or clears it.
+        const note = this.card.querySelector<HTMLParagraphElement>("[data-role=issuer]");
+        const text = chosen ? issuerNote(chosen) : null;
+        if (note) {
+          note.textContent = text ?? "";
+          note.hidden = !text;
+        }
       }),
     );
     const setAmount = (a: number) => {

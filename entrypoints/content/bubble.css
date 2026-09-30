@@ -497,6 +497,15 @@ a:focus-visible {
   animation: gb-spin 700ms linear infinite;
   flex: 0 0 auto;
 }
+.issuer {
+  margin: 0;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  color: #c7c7d1;
+}
+.issuer[hidden] {
+  display: none;
+}
 .foot {
   margin: 0;
   font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
