@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { Answer, type LineOut, type SpeechClip } from "../speech";
+import { Answer, chunkLine, LATER_CHARS, OPENING_CHARS, type LineOut, type SpeechClip } from "../speech";
 
 const clipOf = (text: string): SpeechClip => ({ audio: `mp3:${text}`, mime: "audio/mpeg" });
 const later = <T>(ms: number, v: T) => new Promise<T>((r) => setTimeout(() => r(v), ms));
 
-/** A fake backend: voices a line when `ok(text)`, after `ms`. Records what was asked, in order. */
+/** A fake backend: voices a chunk when `ok(text)`, after `ms`. Records what was asked, in order. */
 function backend(ok: (text: string) => boolean, ms = 0) {
   const asked: string[] = [];
   const synth = vi.fn(async (text: string) => {
@@ -28,6 +28,9 @@ function speaker() {
 }
 
 const LINES = ["One.", "Two.", "Three."];
+/** Long enough that it is spoken in three chunks; the words are what the panel actually says. */
+const LONG =
+  "Nvidia is up about two percent today after its earnings call, and the tokenized share is trading close to the real one. You can buy a fraction of it right here if you want to, any day of the week, and it settles into your vault in a few seconds.";
 
 describe("the backend's voice or silence", () => {
   it("a failed synthesis is silent, and the answer's text is still shown", async () => {
@@ -62,19 +65,37 @@ describe("the backend's voice or silence", () => {
     expect(await a.say("One.", { ...out, current: () => false })).toBe(false);
     expect(played).toEqual([]);
   });
+
+  it("stops part way through a line that stops being current", async () => {
+    const { synth } = backend(() => true);
+    const a = new Answer(synth);
+    const played: string[] = [];
+    // Current for the opening chunk only: the rest of the line is dropped rather than spoken over the next answer.
+    let calls = 0;
+    await a.say(LONG, {
+      current: () => calls++ < 1,
+      play: async (c) => {
+        played.push(c.audio.slice(4));
+        return true;
+      },
+    });
+    expect(played).toHaveLength(1);
+    expect(played[0]).toBe(chunkLine(LONG)[0]);
+  });
 });
 
 describe("the first word comes sooner", () => {
-  it("fetches only the first line at once, and the rest as soon as it is back", async () => {
+  it("asks for two chunks at once, and the rest as soon as the first is back", async () => {
     const { synth, asked } = backend(() => true, 5);
     const a = new Answer(synth);
     a.prepare(LINES);
-    expect(asked).toEqual(["One."]);
+    // Two in flight covers the handoff from the short opening chunk; the rest wait.
+    expect(asked).toEqual(["One.", "Two."]);
     await later(15, null);
     expect(asked).toEqual(["One.", "Two.", "Three."]);
   });
 
-  it("still fetches the rest when the first line fails", async () => {
+  it("still fetches the rest when the first chunk fails", async () => {
     const { synth, asked } = backend((t) => t !== "One.", 5);
     const a = new Answer(synth);
     a.prepare(LINES);
@@ -92,7 +113,7 @@ describe("the first word comes sooner", () => {
     expect(played).toEqual(["One."]);
   });
 
-  it("a line fetched ahead is not asked for again when it is said", async () => {
+  it("a chunk fetched ahead is not asked for again when it is said", async () => {
     const { synth, asked } = backend(() => true, 5);
     const a = new Answer(synth);
     const { played, out } = speaker();
@@ -100,5 +121,63 @@ describe("the first word comes sooner", () => {
     for (const line of LINES) await a.say(line, out);
     expect(asked).toEqual(LINES);
     expect(played).toEqual(LINES);
+  });
+
+  it("speaks a long line as its chunks, in order, and asks for each once", async () => {
+    const { synth, asked } = backend(() => true);
+    const a = new Answer(synth);
+    const { played, out } = speaker();
+    const parts = chunkLine(LONG);
+    expect(parts.length).toBeGreaterThan(1);
+    expect(await a.say(LONG, out)).toBe(true);
+    expect(played).toEqual(parts);
+    expect(asked).toEqual(parts);
+  });
+
+  it("only the answer's opening chunk is cut short; a later line keeps whole sentences", async () => {
+    const { synth } = backend(() => true);
+    const a = new Answer(synth);
+    await a.say("A short opener.", speaker().out);
+    // The second line is already playing behind something, so it is chunked at the looser cap.
+    const played: string[] = [];
+    await a.say(LONG, {
+      current: () => true,
+      play: async (c) => {
+        played.push(c.audio.slice(4));
+        return true;
+      },
+    });
+    expect(played).toEqual(chunkLine(LONG, LATER_CHARS, LATER_CHARS));
+  });
+});
+
+describe("chunking a line", () => {
+  it("leaves a line that already fits alone", () => {
+    expect(chunkLine("Nvidia is up two percent today.")).toEqual(["Nvidia is up two percent today."]);
+  });
+
+  it("keeps every word, in order", () => {
+    const words = (s: string) => s.trim().split(/\s+/);
+    expect(chunkLine(LONG).flatMap(words)).toEqual(words(LONG));
+  });
+
+  it("caps the opening chunk and the ones after it", () => {
+    const parts = chunkLine(LONG);
+    expect(parts[0]!.length).toBeLessThanOrEqual(OPENING_CHARS);
+    for (const p of parts.slice(1)) expect(p.length).toBeLessThanOrEqual(LATER_CHARS);
+  });
+
+  it("ends a chunk before a joining word, not after it", () => {
+    // Cutting after "and" would leave the panel saying "after its earnings call, and" and then stopping.
+    for (const p of chunkLine(LONG)) expect(p).not.toMatch(/\b(and|but|so|because)$/);
+  });
+
+  it("keeps a word longer than the cap whole rather than speaking half of it", () => {
+    const word = "a".repeat(OPENING_CHARS + 30);
+    expect(chunkLine(`${word} okay`)).toEqual([word, "okay"]);
+  });
+
+  it("nothing to say is no chunks", () => {
+    expect(chunkLine("   ")).toEqual([]);
   });
 });
