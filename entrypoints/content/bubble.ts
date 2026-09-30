@@ -9,6 +9,7 @@
  */
 import type { EntityListing, GlanceResult, GlanceEntity, BuyResult, ApiError, WhyResult, CounterViewResult, Holding, TokenMarket, VoiceCompany, VoiceContext, VoiceView } from "../../lib/api-types";
 import { issuerNote } from "../../lib/issuer-note";
+import { priceCheckLine } from "../../lib/price-check";
 import { AMOUNT_CHIPS } from "../../lib/config";
 import { errorAction, type ErrorAction } from "../../lib/error-action";
 import { usd, usdShort, countShort } from "../../lib/format";
@@ -964,8 +965,10 @@ export class Bubble {
     this.lastBuy = buy ?? null;
     this.setState(ok ? "done" : "error");
     this.h.speak(message);
+    const check = buy ? priceCheckLine(buy) : null;
     this.card.innerHTML = `<div class="head"><div class="done">${ok ? `<span class="tick" aria-hidden="true">✓</span>` : ""}<p class="say" aria-live="assertive">${esc(message)}</p></div>${closeBtn()}</div>
       ${buy ? `<p class="sub">${buy.sharesDelta.toPrecision(3)} shares at ${usd(buy.usdPerShare)} · <a href="#" data-act="panel">See in Glance</a></p>` : ""}
+      ${check ? `<p class="check">${esc(check)}</p>` : ""}
       <button class="ghost wide" type="button" data-act="back">Back to reading</button>`;
     this.wireClose();
     this.card.querySelector("[data-act=panel]")?.addEventListener("click", (ev) => {

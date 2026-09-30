@@ -497,6 +497,14 @@ a:focus-visible {
   animation: gb-spin 700ms linear infinite;
   flex: 0 0 auto;
 }
+/* What the price behind a fill was vouched against. Quiet: it is reassurance, not a headline. */
+.check {
+  margin: -6px 0 0;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--gb-muted);
+}
 /* The card for a company Glance knows but cannot trade: what it is, and a watch whose state you can see. */
 .meta {
   margin: -6px 0 0;

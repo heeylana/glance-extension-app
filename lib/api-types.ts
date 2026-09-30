@@ -95,6 +95,13 @@ export interface BuyResult {
   mint: string;
   usdcValue: number;
   usdPerShare: number;
+  /** The reference price the fill was checked against, and which feed it came from. */
+  pythUsdPerShare?: number;
+  priceSource?: "pyth" | "jupiter" | "history";
+  /** How far the fill landed from that reference, in basis points. */
+  deviationBps?: number;
+  /** The feed had not published recently, so the wider off-hours band was used. */
+  priceStale?: boolean;
   sharesDelta: number;
   positionShares: number;
   positionUsd: number;
