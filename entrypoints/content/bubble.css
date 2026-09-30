@@ -497,11 +497,116 @@ a:focus-visible {
   animation: gb-spin 700ms linear infinite;
   flex: 0 0 auto;
 }
-.issuer {
+/* The card for a company Glance knows but cannot trade: what it is, and a watch whose state you can see. */
+.meta {
+  margin: -6px 0 0;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  color: var(--gb-muted);
+}
+.meta b {
+  font-weight: 600;
+  color: var(--gb-text-2);
+}
+.blurb {
   margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--gb-text-2);
+}
+.ticket {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px dashed var(--gb-border);
+  border-radius: 12px;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+.ticket.is-on {
+  border-style: solid;
+  border-color: var(--gb-accent);
+  background: rgba(91, 140, 255, 0.08);
+}
+.t-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.t-tick {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--gb-text-3);
+}
+.ticket.is-on .t-tick {
+  color: var(--gb-fg);
+}
+.t-note {
+  font-size: 13px;
+  color: var(--gb-muted);
+}
+.t-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  color: var(--gb-muted);
+}
+.ticket.is-on .t-state {
+  color: var(--gb-success);
+}
+.t-state .dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--gb-muted-2);
+}
+.ticket.is-on .t-state .dot {
+  background: var(--gb-success);
+  animation: gb-pulse 2.4s ease-out infinite;
+}
+@keyframes gb-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(111, 227, 159, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(111, 227, 159, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(111, 227, 159, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ticket {
+    transition: none;
+  }
+  .ticket.is-on .t-state .dot {
+    animation: none;
+  }
+}
+/* The issuer note belongs to the token above it, so it hangs off that row rather than floating as its own line. */
+.issuer {
+  margin: -6px 0 0;
+  padding-left: 16px;
+  position: relative;
   font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
   font-size: 11px;
-  color: #c7c7d1;
+  line-height: 1.5;
+  color: var(--gb-muted);
+}
+.issuer::before {
+  content: "\21B3";
+  position: absolute;
+  left: 2px;
+  top: 0;
+  color: var(--gb-muted-2);
 }
 .issuer[hidden] {
   display: none;

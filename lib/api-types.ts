@@ -26,6 +26,8 @@ export interface GlanceEntity {
   confidence: number;
   evidence: string[];
   tokenized: boolean;
+  /** A company with no listed shares: the card says so rather than leaving a bare name. */
+  private?: boolean;
   mint?: string;
   decimals?: number;
   priceUsd?: number | null;

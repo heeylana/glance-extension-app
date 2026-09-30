@@ -395,8 +395,21 @@ export class Bubble {
     this.h.onPick?.(e);
     if (!e.tokenized || !e.mint) {
       this.show("untokenized");
-      const line = `That's ${e.name}. It's not available on-chain yet. Want me to tell you when it is?`;
+      /*
+       * A company Glance knows but cannot trade. This used to be a sentence and two buttons, which read as a dead end,
+       * and it is now one of the most likely cards a new user sees: every private company in the resolver lands here.
+       * So it says what the company is, and the ticket row gives the watch a state you can see rather than a message
+       * that replaces the card.
+       */
+      const line = e.private ? `That's ${e.name}. It's private, so it isn't on-chain yet.` : `That's ${e.name}. It isn't on-chain yet.`;
+      const meta = [...(e.private ? ["Private company"] : []), ...(e.kind === "pre-ipo" ? ["pre-IPO"] : [])];
       this.card.innerHTML = `<div class="head"><p class="say">${esc(line)}</p>${closeBtn()}</div>
+        <p class="meta"><b>${esc(e.ticker)}</b>${meta.map((m) => ` · ${esc(m)}`).join("")}</p>
+        ${e.about ? `<p class="blurb">${esc(e.about)}</p>` : ""}
+        <div class="ticket" data-role="ticket">
+          <span class="t-left"><span class="t-tick">${esc(e.ticker)}</span><span class="t-note" data-role="ticket-note">No tokens yet</span></span>
+          <span class="t-state" data-role="ticket-state"><i class="dot" aria-hidden="true"></i>Not listed</span>
+        </div>
         <div class="row"><button class="primary" data-act="watch">Tell me when</button><button class="ghost" data-act="close">No thanks</button></div>
         ${this.alsoRow(e)}`;
       this.wireClose();
@@ -408,7 +421,18 @@ export class Bubble {
         this.work("working");
         const res = await this.h.onWatch(e);
         this.work(null);
-        this.finish(res.ok ? res.message : res.message, res.ok);
+        // A failure still replaces the card: at that point the reason matters more than the company does.
+        if (!res.ok) {
+          this.finish(res.message, false);
+          return;
+        }
+        this.card.querySelector("[data-role=ticket]")?.classList.add("is-on");
+        const note = this.card.querySelector("[data-role=ticket-note]");
+        if (note) note.textContent = "We'll tell you when it lists";
+        const state = this.card.querySelector("[data-role=ticket-state]");
+        if (state) state.innerHTML = `<i class="dot" aria-hidden="true"></i>Watching`;
+        btn.textContent = "Watching";
+        this.h.speak(res.message);
       });
       return;
     }
