@@ -139,6 +139,29 @@ export default defineContentScript({
     };
     /** A one-line answer. Answers of several lines share one Answer, so the rest are fetched while the first plays. */
     const speak = (text: string): Promise<void> => sayLine(newAnswer(), text).then(() => undefined);
+    /**
+     * What Glance says the moment you stop talking, while it is still working out the real answer.
+     *
+     * Measured end to end from Lagos: hearing the take takes about 4s, the model about 10s and the first spoken chunk
+     * about 6s, so without this the panel sits silent for twenty seconds after the key comes up. These lines are short,
+     * fixed and warmed on the backend at boot (services/tts.ts WARM_LINES), so they come from its cache rather than the
+     * voice provider. They are fetched while the user is still speaking and played from memory on release, which is why
+     * they land immediately instead of a round trip later. They make nothing faster. They make Glance answer.
+     */
+    const ACK_LINES = ["One moment.", "Let me look.", "On it."] as const;
+    let ackAnswer: Answer | null = null;
+    let ackLine = "";
+    /** Fetch the line now, while they are still talking, so releasing the key plays it from memory. */
+    const primeAck = () => {
+      if (!voice) return;
+      ackLine = ACK_LINES[Math.floor(Math.random() * ACK_LINES.length)]!;
+      ackAnswer = newAnswer();
+      ackAnswer.prepare([ackLine]);
+    };
+    /** Say it. The real answer calls stopSpeaking() when it arrives, which cuts this short if it is somehow still going. */
+    const acknowledge = () => {
+      if (ackAnswer && ackLine) void sayLine(ackAnswer, ackLine);
+    };
     // ---- Passive mode: dictionary underlines, no network per page (spec §7.3) ----
     let matcher: Matcher | null = null;
     let companies: DictionaryCompany[] = [];
@@ -695,6 +718,8 @@ export default defineContentScript({
       if (take) return true;
       explainRun++;
       stopSpeaking();
+      // Fetched now, said on release: the same trick as warm-why below, for the first sound instead of the answer.
+      primeAck();
       // The most common thing said over a company card is "why did it move?", and that answer takes
       // seconds to build. Start it now, while they speak, so it is waiting when they finish.
       const onCard = bubble.entity;
@@ -729,6 +754,8 @@ export default defineContentScript({
         return;
       }
       bubble.hearing();
+      // Everything past here is a wait: the take goes up, the model thinks, the answer is synthesized. Say something.
+      acknowledge();
       await new Promise((r) => window.setTimeout(r, TALK_TAIL_MS));
       const before = bubble.voiceContext();
       const res = await send({ type: "listen-stop", context: before }).catch((): ApiError => ({ ok: false, code: "OFFLINE", message: OFFLINE }));

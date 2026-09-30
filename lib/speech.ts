@@ -177,10 +177,20 @@ export class Answer {
     return parts;
   }
 
+  /**
+   * Release the queue a few at a time. Dumping every remaining chunk at once made six requests land on the backend
+   * together, and each came back in six to nine seconds instead of two: they contend at the provider and at the
+   * browser's own per-host connection limit. A rolling window of IN_FLIGHT keeps the pipeline ahead of playback
+   * without the pile-up.
+   */
   private fetchQueued() {
     const chunks = this.queued ?? [];
     this.queued = null;
-    for (const text of chunks) void this.fetch(text);
+    const pump = () => {
+      const next = chunks.shift();
+      if (next !== undefined) void this.fetch(next).then(pump, pump);
+    };
+    for (let i = 0; i < IN_FLIGHT && i < chunks.length; i++) pump();
   }
 
   private fetch(text: string): Promise<SpeechClip | null> {

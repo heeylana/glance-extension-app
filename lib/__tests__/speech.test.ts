@@ -95,6 +95,28 @@ describe("the first word comes sooner", () => {
     expect(asked).toEqual(["One.", "Two.", "Three."]);
   });
 
+  it("releases the queue a few at a time instead of all at once", async () => {
+    // Six requests landing together took six to nine seconds each in production, against two on their own.
+    const many = ["a.", "b.", "c.", "d.", "e.", "f."];
+    let open = 0;
+    let peak = 0;
+    const asked: string[] = [];
+    const synth = vi.fn(async (text: string) => {
+      asked.push(text);
+      open++;
+      peak = Math.max(peak, open);
+      await later(5, null);
+      open--;
+      return clipOf(text);
+    });
+    const a = new Answer(synth);
+    a.prepare(many);
+    await later(60, null);
+    expect(asked).toEqual(many);
+    // Two start together, and the window stays small as the rest are drawn off the queue.
+    expect(peak).toBeLessThanOrEqual(4);
+  });
+
   it("still fetches the rest when the first chunk fails", async () => {
     const { synth, asked } = backend((t) => t !== "One.", 5);
     const a = new Answer(synth);
