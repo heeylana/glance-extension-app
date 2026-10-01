@@ -110,9 +110,33 @@ export function Settings({ session, refetchSession }: { session: SessionView | n
             <p className="mt-1 font-mono text-[25px] font-semibold leading-none tracking-[-0.02em] tabular-nums">{usd(session.cashUsd)}</p>
           </div>
           <div className="flex shrink-0 gap-2">
-            <Button size="sm" variant="secondary" onClick={() => void console_("deposit")}>
-              Add
-            </Button>
+            {/*
+             * On devnet the obvious button has to be the one that works. Depositing asks the wallet
+             * for USDC a new account does not have, so it fails on-chain and reads as a broken
+             * product; the test-money route mints it server-side and needs nothing from the wallet.
+             * So devnet puts funding on the primary button and leaves the deposit as the quiet link
+             * below. Mainnet keeps the deposit, where the wallet does hold the money.
+             */}
+            {SOLANA_CLUSTER === "devnet" ? (
+              <Button
+                size="sm"
+                variant="primary"
+                loading={busy === "fund"}
+                onClick={() =>
+                  run("fund", async () => {
+                    const r = await api.post<{ ok: true; message: string }>("/session/fund", { usd: 50 });
+                    if (isApiError(r)) throw new Error(r.message);
+                    return r.message;
+                  })
+                }
+              >
+                Add $50
+              </Button>
+            ) : (
+              <Button size="sm" variant="secondary" onClick={() => void console_("deposit")}>
+                Add
+              </Button>
+            )}
             <Button size="sm" variant="secondary" onClick={() => void console_("withdraw")}>
               Withdraw
             </Button>
@@ -122,16 +146,9 @@ export function Settings({ session, refetchSession }: { session: SessionView | n
           <button
             type="button"
             className="mt-2.5 font-mono text-[11px] text-muted-2 underline-offset-2 hover:text-text-2 hover:underline disabled:opacity-60"
-            disabled={busy === "fund"}
-            onClick={() =>
-              run("fund", async () => {
-                const r = await api.post<{ ok: true; message: string }>("/session/fund", { usd: 50 });
-                if (isApiError(r)) throw new Error(r.message);
-                return r.message;
-              })
-            }
+            onClick={() => void console_("deposit")}
           >
-            Add $50 test money
+            Deposit from your wallet instead
           </button>
         ) : null}
         <Hairline />
